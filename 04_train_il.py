@@ -17,6 +17,7 @@ def pretrain(policy, pretrain_loader):
     policy.pre_train_init()
     i = 0
     while True:
+        # print('Pretrain-Iteration:{}'.format(i))
         for batch in pretrain_loader:
             batch.to(device)
             if not policy.pre_train(batch.constraint_features, batch.edge_index, batch.edge_attr, batch.variable_features):
@@ -75,9 +76,11 @@ def process(policy, data_loader, top_k=[1, 3, 5, 10], optimizer=None):
 if __name__ == "__main__":
     parser = argparse.ArgumentParser()
     parser.add_argument(
-        'problem',
+        '-p',
+        '--problem',
         help='MILP instance type to process.',
         choices=['setcover', 'cauctions', 'ufacilities', 'indset', 'mknapsack'],
+        default='setcover',
     )
     parser.add_argument(
         '-s', '--seed',
@@ -100,7 +103,7 @@ if __name__ == "__main__":
     args = parser.parse_args()
 
     ### HYPER PARAMETERS ###
-    max_epochs = 1000
+    max_epochs = 100
     batch_size = 32
     pretrain_batch_size = 128
     valid_batch_size = 128

@@ -42,7 +42,7 @@ def send_orders(orders_queue, instances, seed, query_expert_prob, time_limit, ou
     queue capacity).
 
     Parameters
-    ----------
+    ---------- 
     orders_queue : queue.Queue
         Queue to which to send orders.
     instances : list
@@ -153,7 +153,7 @@ def collect_samples(instances, out_dir, rng, n_samples, n_jobs,
                     query_expert_prob, time_limit):
     """
     Runs branch-and-bound episodes on the given set of instances, and collects
-    randomly (state, action) pairs from the 'vanilla-fullstrong' expert
+    randomly (state, action) pairs from the 'vanilla-full strong' expert
     brancher.
     Parameters
     ----------

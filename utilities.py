@@ -153,7 +153,7 @@ def configure_logging(header=""):
 class BipartiteNodeData(torch_geometric.data.Data):
     def __init__(self, constraint_features, edge_indices, edge_features, variable_features,
                  candidates, candidate_choice, candidate_scores):
-        super().__init__()
+        super(BipartiteNodeData,self).__init__()
         self.constraint_features = constraint_features
         self.edge_index = edge_indices
         self.edge_attr = edge_features
@@ -174,7 +174,7 @@ class BipartiteNodeData(torch_geometric.data.Data):
 
 class GraphDataset(torch_geometric.data.Dataset):
     def __init__(self, sample_files):
-        super().__init__(root=None, transform=None, pre_transform=None)
+        super(GraphDataset,self).__init__(root=None, transform=None, pre_transform=None)
         self.sample_files = sample_files
 
     def len(self):
@@ -198,6 +198,7 @@ class GraphDataset(torch_geometric.data.Dataset):
 
         graph = BipartiteNodeData(constraint_features, edge_indices, edge_features, variable_features,
                                   candidates, candidate_choice, candidate_scores)
+        # print(graph)
         graph.num_nodes = constraint_features.shape[0]+variable_features.shape[0]
         return graph
 

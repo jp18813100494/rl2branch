@@ -31,12 +31,14 @@ if __name__ == '__main__':
     # read command-line arguments
     parser = argparse.ArgumentParser()
     parser.add_argument(
-        'problem',
+        '-p',
+        '--problem',
         help='MILP instance type to process.',
         choices=['setcover', 'cauctions', 'ufacilities', 'indset', 'mknapsack'],
     )
     parser.add_argument(
-        'mode',
+        '-m',
+        '--mode',
         help='Training mode.',
         choices=['mdp', 'tmdp+DFS', 'tmdp+ObjLim'],
     )
