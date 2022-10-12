@@ -1,0 +1,174 @@
+import ecole
+import numpy as np
+
+import utilities
+from agent import TreeRecorder
+
+class DFSBranchingDynamics(ecole.dynamics.BranchingDynamics):
+    """
+    Custom branching environment that changes the node strategy to DFS when training.
+    """
+    def reset_dynamics(self, model, primal_bound, training, *args, **kwargs):
+        pyscipopt_model = model.as_pyscipopt()
+        if training:
+            # Set the dfs node selector as the least important
+            pyscipopt_model.setParam(f"nodeselection/dfs/stdpriority", 666666)
+            pyscipopt_model.setParam(f"nodeselection/dfs/memsavepriority", 666666)
+        else:
+            # Set the dfs node selector as the most important
+            pyscipopt_model.setParam(f"nodeselection/dfs/stdpriority", 0)
+            pyscipopt_model.setParam(f"nodeselection/dfs/memsavepriority", 0)
+
+        return super().reset_dynamics(model, *args, **kwargs)
+
+class DFSBranchingEnv(ecole.environment.Environment):
+    __Dynamics__ = DFSBranchingDynamics
+
+class ObjLimBranchingDynamics(ecole.dynamics.BranchingDynamics):
+    """
+    Custom branching environment that allows the user to set an initial primal bound.
+    """
+    def reset_dynamics(self, model, primal_bound, training, *args, **kwargs):
+        pyscipopt_model = model.as_pyscipopt()
+        if primal_bound is not None:
+            pyscipopt_model.setObjlimit(primal_bound)
+
+        return super().reset_dynamics(model, *args, **kwargs)
+
+class ObjLimBranchingEnv(ecole.environment.Environment):
+    __Dynamics__ = ObjLimBranchingDynamics
+
+class MDPBranchingDynamics(ecole.dynamics.BranchingDynamics):
+    """
+    Regular branching environment that allows extra input parameters, but does
+    not use them.
+    """
+    def reset_dynamics(self, model, primal_bound, training, *args, **kwargs):
+        return super().reset_dynamics(model, *args, **kwargs)
+
+class MDPBranchingEnv(ecole.environment.Environment):
+    __Dynamics__ = MDPBranchingDynamics
+
+
+class base_env(object):
+    def __init__(self, mode, time_limit):
+        self.mode = mode
+        self.time_limit = time_limit
+
+        # Setup Ecole environment
+        self.scip_params={'separating/maxrounds': 0,
+                     'presolving/maxrestarts': 0,
+                     'limits/time': time_limit,
+                     'timing/clocktype': 2}
+        self.observation_function=(
+            ecole.observation.FocusNode(),
+            ecole.observation.NodeBipartite()
+            )
+        self.reward_function=ecole.reward.NNodes().cumsum()
+        self.information_function={
+            'nnodes': ecole.reward.NNodes().cumsum(),
+            'lpiters': ecole.reward.LpIterations().cumsum(),
+            'time': ecole.reward.SolvingTime().cumsum()
+        }
+
+        if mode == 'tmdp+ObjLim':
+            self.env = ObjLimBranchingEnv(scip_params=self.scip_params,
+                                          pseudo_candidates=False,
+                                          observation_function=self.observation_function,
+                                          reward_function=self.reward_function,
+                                          information_function=self.information_function)
+        elif mode == 'tmdp+DFS':
+            self.env = DFSBranchingEnv(scip_params=self.scip_params,
+                                       pseudo_candidates=False,
+                                       observation_function=self.observation_function,
+                                       reward_function=self.reward_function,
+                                       information_function=self.information_function)
+        elif mode == 'mdp':
+            self.env = MDPBranchingEnv(scip_params=self.scip_params,
+                                       pseudo_candidates=False,
+                                       observation_function=self.observation_function,
+                                       reward_function=self.reward_function,
+                                       information_function=self.information_function)
+        else:
+            raise NotImplementedError
+
+
+class branch_env(base_env):
+    def __init__(self, instance_set, sol_sets,mode, time_limit, seed):
+        super().__init__(mode,time_limit)
+        self.instance_set = instance_set
+        self.sol_sets = sol_sets
+        self.seed = seed
+        self.train_size = len(instance_set)
+        self.sample_rate = 0
+        #shuffle，seed
+        self.instance_ind = 0
+        self.epoch_shuffle_inds = np.arange(self.train_size)
+
+    def sample_instance(self):
+        if self.instance_ind % self.train_size == 0:
+            np.random.shuffle(self.epoch_shuffle_inds)
+            self.instance_ind = 0
+        instance_file = self.instance_set[self.epoch_shuffle_inds[self.instance_ind]]
+        self.instance_ind += 1
+        return instance_file
+
+    def initialize(self,instance,training=False):
+        # Run episode
+        sol = self.sol_sets[instance] if instance in self.sol_sets else None
+        self.observation, self.action_set, self.reward, self.done, self.info = self.env.reset(instance = instance,
+                                                                                                                    primal_bound=sol,
+                                                                                                                    training=training)
+        self.focus_node_obs, node_bipartite_obs = self.observation
+        self.state = utilities.extract_state(node_bipartite_obs, self.action_set, self.focus_node_obs.number)
+        self.tree_recorder = TreeRecorder()
+        self.transitions = []
+        return True
+
+    def reset(self, instance_file=None,sample_rate=0,training=False,seed=None):
+        self.sample_rate = sample_rate
+        self.seed = seed if seed is not None else 0
+        self.rng = np.random.RandomState(self.seed)
+        if instance_file is None:
+            while True:
+                instance_file = self.sample_instance()
+                if (self.initialize(instance_file,training)):
+                    break
+            self.load_success = True
+        else:
+            self.load_success = self.initialize(instance_file,training)
+        return self.state
+
+    def step(self, action_idx):
+        action = self.action_set[action_idx]
+        # collect transition samples if requested
+        if self.sample_rate > 0:
+            self.tree_recorder.record_branching_decision(self.focus_node_obs)
+            keep_sample = self.rng.rand() < self.sample_rate
+            if keep_sample:
+                transition = utilities.Transition(self.state, action_idx, self.reward)
+                self.transitions.append(transition)
+
+        self.observation, self.action_set, self.reward, self.done, self.info = self.env.step(action)
+        self.focus_node_obs, node_bipartite_obs = self.observation
+        self.state = utilities.extract_state(node_bipartite_obs, self.action_set, self.focus_node_obs.number)
+
+        if self.done:
+            # post-process the collected samples (credit assignment)
+            if self.sample_rate > 0:
+                if self.mode in ['tmdp+ObjLim', 'tmdp+DFS']:
+                    subtree_sizes = self.tree_recorder.calculate_subtree_sizes()
+                    for transition in self.transitions:
+                        transition.returns = -subtree_sizes[transition.node_id] - 1
+                else:
+                    assert self.mode == 'mdp'
+                    for transition in self.transitions:
+                        transition.returns = transition.cum_nnodes - self.reward
+        return self.state,self.reward,self.done,self.info
+
+    
+
+    
+
+
+        
