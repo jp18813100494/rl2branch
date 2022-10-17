@@ -1,6 +1,7 @@
 import os
 import json
 import gzip
+from tkinter import N
 import ecole
 import pickle
 import logging
@@ -82,6 +83,40 @@ class Transition(torch_geometric.data.Data):
                         for key in self.keys}
         return Transition(**cuda_values)
 
+class FullTransition(Transition):
+    def __init__(self, state,action,scores,reward,done,next_state,cum_nnodes=None):
+        super().__init__(state,action,cum_nnodes)
+        self.scores=scores
+        self.reward = reward
+        self.done = done
+
+        self.constraint_features_n = next_state.constraint_features
+        self.edge_index_n = next_state.edge_index
+        self.edge_attr_n = next_state.edge_attr
+        self.variable_features_n = next_state.variable_features
+        self.action_set_n = next_state.action_set
+        self.action_set_n_size = next_state.action_set_size
+        self.node_id_n = next_state.node_id
+        self.num_nodes_n = next_state.num_nodes
+
+    def to(self, device):
+        """
+        Current version is inplace, which is incoherent with how pytorch's to() function works.
+        This overloads it.
+        """
+        cuda_values = {key: self[key].to(device) if isinstance(self[key], torch.Tensor) else self[key]
+                        for key in self.keys}
+        return FullTransition(**cuda_values)
+
+def BuildFullTransition(data_files):
+    transitions = []
+    for sample_file in data_files:
+        with gzip.open(sample_file, 'rb') as f:
+            sample = pickle.load(f)
+        state, action, scores, reward, done, next_state = sample['data']
+        fulltransition = FullTransition(state,action,scores,reward,done,next_state)
+        transitions.append(fulltransition)
+    return transitions
 
 def extract_state(observation, action_set, node_id):
     constraint_features = torch.FloatTensor(observation.row_features)
@@ -201,6 +236,44 @@ class GraphDataset(torch_geometric.data.Dataset):
         # print(graph)
         graph.num_nodes = constraint_features.shape[0]+variable_features.shape[0]
         return graph
+
+class ExtendGraphDataset(torch_geometric.data.Dataset):
+    def __init__(self, sample_files):
+        super(ExtendGraphDataset,self).__init__(root=None, transform=None, pre_transform=None)
+        self.sample_files = sample_files
+
+    def len(self):
+        return len(self.sample_files)
+
+    def get(self, index):
+        #TODO:需要重构，不然似乎无法batch读取
+        with gzip.open(self.sample_files[index], 'rb') as f:
+            sample = pickle.load(f)
+
+        state, action, scores, reward, done, next_state = sample['data']
+        graph = extract_graph(state,action,scores)
+        #define action,reward,terminals
+        action = torch.FloatTensor(np.expand_dims(action, axis=-1))
+        reward = torch.FloatTensor(np.expand_dims(reward, axis=-1))
+        terminal = torch.FloatTensor(np.expand_dims(done.int(), axis=-1))
+        graph_next = extract_graph(next_state)
+        return (graph,action,reward,graph_next,terminal)
+
+def extract_graph(state,action=None,scores=None,):
+    #define state-graph
+    constraint_features = torch.FloatTensor(state['constraint_features'])
+    edge_indices = torch.LongTensor(state['edge_indices'].astype(np.int32))
+    edge_features = torch.FloatTensor(np.expand_dims(state['edge_features'], axis=-1))
+    variable_features = torch.FloatTensor(state['variable_features'])
+
+    candidates = torch.LongTensor(np.array(state['action_set'], dtype=np.int32))
+    candidate_choice = torch.where(candidates == action)[0][0]  # action index relative to candidates
+    candidate_scores = torch.FloatTensor([scores[j] for j in candidates])
+
+    graph = BipartiteNodeData(constraint_features, edge_indices, edge_features, variable_features,
+                                candidates, candidate_choice, candidate_scores)
+    graph.num_nodes = constraint_features.shape[0]+variable_features.shape[0]
+    return graph
 
 
 class Scheduler(torch.optim.lr_scheduler.ReduceLROnPlateau):

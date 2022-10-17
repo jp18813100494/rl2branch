@@ -73,6 +73,7 @@ if __name__ == '__main__':
     args = parser.parse_args()
 
     if args.problem == 'setcover':
+        # instance_dir = 'data/instances/setcover/valid_400r_750c_0.05d'
         instance_dir = 'data/instances/setcover/train_400r_750c_0.05d'
         instances = glob.glob(instance_dir + '/*.lp')
     elif args.problem == 'cauctions':

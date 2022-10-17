@@ -17,7 +17,7 @@ def pretrain(policy, pretrain_loader):
     policy.pre_train_init()
     i = 0
     while True:
-        # print('Pretrain-Iteration:{}'.format(i))
+        print('Pretrain-Iteration:{}'.format(i))
         for batch in pretrain_loader:
             batch.to(device)
             if not policy.pre_train(batch.constraint_features, batch.edge_index, batch.edge_attr, batch.variable_features):

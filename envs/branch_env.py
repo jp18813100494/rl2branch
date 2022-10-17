@@ -3,6 +3,7 @@ import numpy as np
 
 import utilities
 from agent import TreeRecorder
+from gym import spaces
 
 class DFSBranchingDynamics(ecole.dynamics.BranchingDynamics):
     """
@@ -94,16 +95,21 @@ class base_env(object):
 
 
 class branch_env(base_env):
-    def __init__(self, instance_set, sol_sets,mode, time_limit, seed):
-        super().__init__(mode,time_limit)
+    def __init__(self, instance_set, sol_sets,config):
+        super().__init__(config['mode'],config['time_limit'])
         self.instance_set = instance_set
         self.sol_sets = sol_sets
-        self.seed = seed
+        self.seed = config['seed']
         self.train_size = len(instance_set)
         self.sample_rate = 0
+        self.eps = -0.1 if config['maximization'] else 0.1
         #shuffle，seed
         self.instance_ind = 0
         self.epoch_shuffle_inds = np.arange(self.train_size)
+        lower = np.array([0]*1,dtype=np.float32)
+        upper = np.array([1]*1,dtype=np.float32)
+        self.observation_space = spaces.Box(low = lower, high = upper, shape = (1,), dtype=np.float32)
+        self.action_space = spaces.Box(low = -self.action_bound, high = self.action_bound, shape = (1,), dtype=np.float32)
 
     def sample_instance(self):
         if self.instance_ind % self.train_size == 0:
@@ -115,9 +121,10 @@ class branch_env(base_env):
 
     def initialize(self,instance,training=False):
         # Run episode
+        self.instance = instance
         sol = self.sol_sets[instance] if instance in self.sol_sets else None
         self.observation, self.action_set, self.reward, self.done, self.info = self.env.reset(instance = instance,
-                                                                                                                    primal_bound=sol,
+                                                                                                                    primal_bound=sol+self.eps,
                                                                                                                     training=training)
         self.focus_node_obs, node_bipartite_obs = self.observation
         self.state = utilities.extract_state(node_bipartite_obs, self.action_set, self.focus_node_obs.number)

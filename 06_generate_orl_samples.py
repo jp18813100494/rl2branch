@@ -14,6 +14,7 @@ import shutil
 import threading
 import numpy as np
 import ecole
+import utilities
 from collections import namedtuple
 
 
@@ -87,6 +88,7 @@ def make_samples(in_queue, out_queue, stop_flag):
         scip_parameters = {'separating/maxrounds': 0, 'presolving/maxrestarts': 0,
                            'limits/time': time_limit, 'timing/clocktype': 2}
         observation_function = { "scores": ExploreThenStrongBranch(expert_probability=query_expert_prob),
+                                "focus_node":ecole.observation.FocusNode(),
                                  "node_observation": ecole.observation.NodeBipartite() }
         reward_function=ecole.reward.NNodes()
         env = ecole.environment.Branching(observation_function=observation_function,reward_function=reward_function,
@@ -105,24 +107,31 @@ def make_samples(in_queue, out_queue, stop_flag):
         observation, action_set, reward, done, _ = env.reset(instance)
         while not done:
             scores, scores_are_expert = observation["scores"]
+            focus_node_obs = observation["focus_node"]
             node_observation = observation["node_observation"]
-            node_observation = (node_observation.row_features,
-                                (node_observation.edge_features.indices,
-                                 node_observation.edge_features.values),
-                                node_observation.column_features)
-            action = action_set[scores[action_set].argmax()]
+            state = utilities.extract_state(node_observation, action_set, focus_node_obs.number)
+            # state = {'constraint_features':node_observation.row_features,
+            #             'edge_index':node_observation.edge_features.indices,
+            #             'edge_attr':node_observation.edge_features.values,
+            #             'variable_features':node_observation.column_features,
+            #             'action_set':action_set,
+            #             'node_id': focus_node_obs.number}
 
+            action = action_set[scores[action_set].argmax()]
             try:
-                next_observation, action_set, reward, done, _ = env.step(action)
+                next_observation, action_set_n, reward, done, _ = env.step(action)
 
                 if scores_are_expert and not stop_flag.is_set():
+                    focus_node_obs_n = next_observation["focus_node"]
                     node_observation_n = next_observation["node_observation"]
-                    node_observation_n = (node_observation_n.row_features,
-                                    (node_observation_n.edge_features.indices,
-                                    node_observation_n.edge_features.values),
-                                    node_observation_n.column_features)
-
-                    data = [node_observation, action, action_set, scores, reward, node_observation_n]
+                    next_state = utilities.extract_state(node_observation_n, action_set_n, focus_node_obs_n.number)
+                    # next_state = {'constraint_features':node_observation_n.row_features,
+                    #                     'edge_index':node_observation_n.edge_features.indices,
+                    #                     'edge_attr':node_observation_n.edge_features.values,
+                    #                     'variable_features':node_observation_n.column_features,
+                    #                     'action_set':action_set_n,
+                    #                     'node_id': focus_node_obs_n.number}
+                    data = [state, action, scores, reward,  done, next_state]
                     filename = f'{out_dir}/sample_{episode}_{sample_counter}.pkl'
 
                     with gzip.open(filename, 'wb') as f:
@@ -142,13 +151,12 @@ def make_samples(in_queue, out_queue, stop_flag):
                     sample_counter += 1
 
                 observation = next_observation
+                action_set = action_set_n
             except Exception as e:
                 done = True
                 with open("error_log.txt","a") as f:
                     f.write(f"Error occurred solving {instance} with seed {seed}\n")
                     f.write(f"{e}\n")
-
-            
 
         print(f"[w {threading.current_thread().name}] episode {episode} done, {sample_counter} samples\n", end='')
         out_queue.put({
@@ -286,8 +294,8 @@ if __name__ == '__main__':
 
     print(f"seed {args.seed}")
 
-    train_size = 500000
-    valid_size = 50000
+    train_size = 100000
+    valid_size = 20000
     node_record_prob = 1.0
     time_limit = 3600
 
