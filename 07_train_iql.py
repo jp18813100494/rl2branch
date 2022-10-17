@@ -44,9 +44,7 @@ def get_config():
     parser.add_argument("--mode", type=str, default='mdp', help="Mode for branch env")
     parser.add_argument("--time_limit", type=int, default=4000, help="Timelimit of the solver")
     parser.add_argument('--wandb',help="Use wandb?",default=False,action="store_true")
-    # token = '{}-{}-{}'.format(datetime.datetime.now().strftime('%Y-%m-%d_%H-%M-%S'), config.run_name, config.mode)
-    # model_dir = osp.realpath(osp.join('results', token))
-    # parser.add_argument('--model_dir',type=str,default=model_dir, help="Model dir for IQL-actor,critic,value")
+    
     
     args = parser.parse_args()
     return args
@@ -90,6 +88,7 @@ def train(config):
 
     token = '{}-{}-{}'.format(datetime.datetime.now().strftime('%Y-%m-%d_%H-%M-%S'), config.run_name, config.mode)
     model_dir = osp.realpath(osp.join('results', token))
+    config.model_dir = model_dir
 
      # data
     if config.problem == "setcover":
@@ -112,6 +111,8 @@ def train(config):
         maximization = True
         valid_path = "data/instances/mknapsack/valid_100_6"
         train_path = "data/instances/mknapsack/train_100_6"
+    else:
+        raise NotImplementedError
     config.maximization = maximization
 
     problem_folders = {
@@ -140,8 +141,8 @@ def train(config):
     if config.wandb:
         wandb.init(project="rl2branch", name='IQL', config=config)
 
-    train_files = [str(file) for file in (pathlib.Path(f'data/samples_orl2')/problem_folder/'train').glob('sample_*.pkl')]
-    valid_files = [str(file) for file in (pathlib.Path(f'data/samples_orl2')/problem_folder/'valid').glob('sample_*.pkl')]
+    train_files = [str(file) for file in (pathlib.Path(f'data/samples_orl')/problem_folder/'train').glob('sample_*.pkl')]
+    valid_files = [str(file) for file in (pathlib.Path(f'data/samples_orl')/problem_folder/'valid').glob('sample_*.pkl')]
     logger.info(f"Training on {len(train_files)} training instances and {len(valid_files)} validation instances")
     # collect the pre-computed optimal solutions for the training instances
     with open(f"{train_path}/instance_solutions.json", "r") as f:

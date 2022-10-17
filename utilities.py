@@ -5,6 +5,7 @@ from tkinter import N
 import ecole
 import pickle
 import logging
+import glog
 import itertools
 import numpy as np
 import torch
@@ -112,6 +113,7 @@ def BuildFullTransition(data_files):
     transitions = []
     for sample_file in data_files:
         with gzip.open(sample_file, 'rb') as f:
+            glog.info('Loading data from {}'.format(f))
             sample = pickle.load(f)
         state, action, scores, reward, done, next_state = sample['data']
         fulltransition = FullTransition(state,action,scores,reward,done,next_state)
