@@ -65,7 +65,7 @@ class base_env(object):
             ecole.observation.FocusNode(),
             ecole.observation.NodeBipartite()
             )
-        self.reward_function=ecole.reward.NNodes().cumsum()
+        self.reward_function=ecole.reward.NNodes()
         self.information_function={
             'nnodes': ecole.reward.NNodes().cumsum(),
             'lpiters': ecole.reward.LpIterations().cumsum(),
@@ -123,9 +123,10 @@ class branch_env(base_env):
         # Run episode
         self.instance = instance
         sol = self.sol_sets[instance] if instance in self.sol_sets else None
-        self.observation, self.action_set, self.reward, self.done, self.info = self.env.reset(instance = instance,
-                                                                                                                    primal_bound=sol+self.eps,
+        self.observation, self.action_set, self.reward, self.done, self.info = self.env.reset(instance = instance,primal_bound=sol+self.eps,
                                                                                                                     training=training)
+        if self.observation is None:
+            return False
         self.focus_node_obs, node_bipartite_obs = self.observation
         self.state = utilities.extract_state(node_bipartite_obs, self.action_set, self.focus_node_obs.number)
         self.tree_recorder = TreeRecorder()
@@ -157,10 +158,8 @@ class branch_env(base_env):
                 self.transitions.append(transition)
 
         self.observation, self.action_set, self.reward, self.done, self.info = self.env.step(action)
-        self.focus_node_obs, node_bipartite_obs = self.observation
-        self.state = utilities.extract_state(node_bipartite_obs, self.action_set, self.focus_node_obs.number)
 
-        if self.done:
+        if self.done or self.observation == None:
             # post-process the collected samples (credit assignment)
             if self.sample_rate > 0:
                 if self.mode in ['tmdp+ObjLim', 'tmdp+DFS']:
@@ -171,6 +170,9 @@ class branch_env(base_env):
                     assert self.mode == 'mdp'
                     for transition in self.transitions:
                         transition.returns = transition.cum_nnodes - self.reward
+        else:
+            self.focus_node_obs, node_bipartite_obs = self.observation
+            self.state = utilities.extract_state(node_bipartite_obs, self.action_set, self.focus_node_obs.number)
         return self.state,self.reward,self.done,self.info
 
     
