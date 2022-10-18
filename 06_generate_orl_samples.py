@@ -90,7 +90,7 @@ def make_samples(in_queue, out_queue, stop_flag):
         observation_function = { "scores": ExploreThenStrongBranch(expert_probability=query_expert_prob),
                                 "focus_node":ecole.observation.FocusNode(),
                                  "node_observation": ecole.observation.NodeBipartite() }
-        reward_function=ecole.reward.NNodes()
+        reward_function= ecole.reward.NNodes()
         env = ecole.environment.Branching(observation_function=observation_function,reward_function=reward_function,
                                           scip_params=scip_parameters, pseudo_candidates=True)
 

@@ -62,8 +62,9 @@ class Transition(torch_geometric.data.Data):
         self.action_set_size = state.action_set_size
         self.node_id = state.node_id
         self.num_nodes = state.num_nodes
-
-        self.action = action
+        assert self.edge_index.max()<self.variable_features.shape[0]
+        # self.action = action
+        self.action = torch.LongTensor(np.array([action],dtype=np.int32))
         self.cum_nnodes = cum_nnodes
         self.returns = None
 
@@ -85,11 +86,13 @@ class Transition(torch_geometric.data.Data):
         return Transition(**cuda_values)
 
 class FullTransition(Transition):
-    def __init__(self, state,action,scores,reward,done,next_state,cum_nnodes=None):
+    def __init__(self, state, action,scores,reward,done,next_state,cum_nnodes=None):
         super().__init__(state,action,cum_nnodes)
-        self.scores=scores
-        self.reward = reward
-        self.done = done
+        action_idx = scores[self.action_set].argmax()
+        self.action_idx = torch.LongTensor(np.array([action_idx],dtype=np.int32))
+        self.scores = torch.LongTensor(scores)
+        self.reward = torch.FloatTensor(np.expand_dims(-reward, axis=-1))
+        self.done = torch.FloatTensor(np.expand_dims(int(done), axis=-1))
 
         self.constraint_features_n = next_state.constraint_features
         self.edge_index_n = next_state.edge_index
@@ -99,6 +102,19 @@ class FullTransition(Transition):
         self.action_set_n_size = next_state.action_set_size
         self.node_id_n = next_state.node_id
         self.num_nodes_n = next_state.num_nodes
+        assert self.edge_index_n.max()<self.variable_features_n.shape[0]
+
+    def __inc__(self, key, value):
+        if key == 'edge_index':
+            return torch.tensor([[self.constraint_features.size(0)], [self.variable_features.size(0)]])
+        if key == 'edge_index_n':
+            return torch.tensor([[self.constraint_features_n.size(0)], [self.variable_features_n.size(0)]])
+        elif key == 'action_set':
+            return self.variable_features.size(0)
+        elif key == 'action_set_n':
+            return self.variable_features_n.size(0)
+        else:
+            return super().__inc__(key, value)
 
     def to(self, device):
         """
@@ -113,7 +129,6 @@ def BuildFullTransition(data_files):
     transitions = []
     for sample_file in data_files:
         with gzip.open(sample_file, 'rb') as f:
-            glog.info('Loading data from {}'.format(f))
             sample = pickle.load(f)
         state, action, scores, reward, done, next_state = sample['data']
         fulltransition = FullTransition(state,action,scores,reward,done,next_state)
