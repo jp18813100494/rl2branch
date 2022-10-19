@@ -1,0 +1,27 @@
+{
+    "algo_name": "IQL",
+    "hidden_size": 64,
+    "lr": 1e-3,
+    "temperature": 3,
+    "expectile": 0.7,
+    "tau": 5e-3,
+    "gamma": 0.99,
+    "hard_update_every": 10,
+    "clip_grad_param": 100,
+
+    "max_epochs": 200,
+    "save_every": 100,
+    "eval_every": 1,
+    "batch_size": 32,
+    "valid_batch_size": 128,
+    "num_valid_instances": 1000,
+
+    "problem": "setcover",
+    "mode": "mdp",
+    "time_limit": 4000,
+    "sample_rate": 0.05,
+
+    "gpu": 0,
+    "seed": 0,
+    "wandb": false
+}

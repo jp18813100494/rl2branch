@@ -96,13 +96,14 @@ class base_env(object):
 
 class branch_env(base_env):
     def __init__(self, instance_set, sol_sets,config):
-        super().__init__(config.mode,config.time_limit)
+        super().__init__(config['mode'],config['time_limit'])
         self.instance_set = instance_set
         self.sol_sets = sol_sets
-        self.seed = config.seed
+        self.seed = config['seed']
         self.train_size = len(instance_set)
+
         self.sample_rate = 0
-        self.eps = -0.1 if config.maximization else 0.1
+        self.eps = -0.1 if config['maximization'] else 0.1
         #shuffle，seed
         self.instance_ind = 0
         self.epoch_shuffle_inds = np.arange(self.train_size)

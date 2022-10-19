@@ -63,7 +63,6 @@ class Transition(torch_geometric.data.Data):
         self.node_id = state.node_id
         self.num_nodes = state.num_nodes
         assert self.edge_index.max()<self.variable_features.shape[0]
-        # self.action = action
         self.action = torch.LongTensor(np.array([action],dtype=np.int32))
         self.cum_nnodes = cum_nnodes
         self.returns = None
@@ -157,51 +156,6 @@ def pad_tensor(input_, pad_sizes, pad_value=-1e8):
     return output
 
 
-class FormatterWithHeader(logging.Formatter):
-    """
-    From
-    https://stackoverflow.com/questions/33468174/write-header-to-a-python-log-file-but-only-if-a-record-gets-written
-    """
-    def __init__(self, header, fmt=None, datefmt=None, style='%'):
-        super().__init__(fmt, datefmt, style)
-        self.header = header
-        self.format = self.first_line_format
-
-    def first_line_format(self, record):
-        self.format = super().format
-        return self.header + "\n" + self.format(record)
-
-
-def configure_logging(header=""):
-    os.makedirs("logs/", exist_ok=True)
-    current_date = datetime.now().strftime('%Y-%m-%d')
-    current_time = datetime.now().strftime('%H:%M:%S')
-    output_file = f"logs/{current_date}--{current_time.replace(':','.')}.log"
-    logging_header = (
-    f"rl2branch log\n"
-    f"-------------\n"
-    f"Training started on {current_date} at {current_time}\n"
-    )
-
-    logger = logging.getLogger("rl2branch")
-    logger.setLevel(logging.DEBUG)
-
-    formatter = FormatterWithHeader(header=header,
-                                    fmt='[%(asctime)s %(levelname)-8s]  %(threadName)-12s  %(message)s',
-                                    datefmt='%H:%M:%S')
-
-    handler_file = logging.FileHandler(output_file, 'w', 'utf-8')
-    handler_file.setLevel(logging.DEBUG)
-    handler_file.setFormatter(formatter)
-    logger.addHandler(handler_file)
-
-    handler_console = logging.StreamHandler()
-    handler_console.setLevel(logging.DEBUG)
-    handler_console.setFormatter(formatter)
-    logger.addHandler(handler_console)
-    return logger
-
-
 class BipartiteNodeData(torch_geometric.data.Data):
     def __init__(self, constraint_features, edge_indices, edge_features, variable_features,
                  candidates, candidate_choice, candidate_scores):
@@ -254,6 +208,7 @@ class GraphDataset(torch_geometric.data.Dataset):
         graph.num_nodes = constraint_features.shape[0]+variable_features.shape[0]
         return graph
 
+# Not used in current version
 class ExtendGraphDataset(torch_geometric.data.Dataset):
     def __init__(self, sample_files):
         super(ExtendGraphDataset,self).__init__(root=None, transform=None, pre_transform=None)
@@ -263,7 +218,6 @@ class ExtendGraphDataset(torch_geometric.data.Dataset):
         return len(self.sample_files)
 
     def get(self, index):
-        #TODO:需要重构，不然似乎无法batch读取
         with gzip.open(self.sample_files[index], 'rb') as f:
             sample = pickle.load(f)
 
@@ -312,3 +266,47 @@ class Scheduler(torch.optim.lr_scheduler.ReduceLROnPlateau):
             self._reduce_lr(self.last_epoch)
 
         self._last_lr = [group['lr'] for group in self.optimizer.param_groups]
+
+class FormatterWithHeader(logging.Formatter):
+    """
+    From
+    https://stackoverflow.com/questions/33468174/write-header-to-a-python-log-file-but-only-if-a-record-gets-written
+    """
+    def __init__(self, header, fmt=None, datefmt=None, style='%'):
+        super().__init__(fmt, datefmt, style)
+        self.header = header
+        self.format = self.first_line_format
+
+    def first_line_format(self, record):
+        self.format = super().format
+        return self.header + "\n" + self.format(record)
+
+
+def configure_logging(header=""):
+    os.makedirs("logs/", exist_ok=True)
+    current_date = datetime.now().strftime('%Y-%m-%d')
+    current_time = datetime.now().strftime('%H:%M:%S')
+    output_file = f"logs/{current_date}--{current_time.replace(':','.')}.log"
+    logging_header = (
+    f"rl2branch log\n"
+    f"-------------\n"
+    f"Training started on {current_date} at {current_time}\n"
+    )
+
+    logger = logging.getLogger("rl2branch")
+    logger.setLevel(logging.DEBUG)
+
+    formatter = FormatterWithHeader(header=header,
+                                    fmt='[%(asctime)s %(levelname)-8s]  %(threadName)-12s  %(message)s',
+                                    datefmt='%H:%M:%S')
+
+    handler_file = logging.FileHandler(output_file, 'w', 'utf-8')
+    handler_file.setLevel(logging.DEBUG)
+    handler_file.setFormatter(formatter)
+    logger.addHandler(handler_file)
+
+    handler_console = logging.StreamHandler()
+    handler_console.setLevel(logging.DEBUG)
+    handler_console.setFormatter(formatter)
+    logger.addHandler(handler_console)
+    return logger
