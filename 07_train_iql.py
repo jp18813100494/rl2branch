@@ -96,7 +96,7 @@ def get_config():
         raise NotImplementedError
     config['maximization'] = maximization
         # model path
-    cur_name = '{}-{}-{}'.format(config['algo_name'],  config['mode'], datetime.datetime.now().strftime('%Y-%m-%d_%H-%M-%S'))
+    cur_name = '{}-{}-{}-{}'.format(config['algo_name'],  config['mode'], config['problem'],  datetime.datetime.now().strftime('%Y-%m-%d_%H-%M-%S'))
     token = '{}/{}'.format(config['problem'], cur_name)
     model_dir = osp.realpath(osp.join('results', token))
     config['model_dir'] = model_dir
