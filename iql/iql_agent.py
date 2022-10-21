@@ -9,7 +9,8 @@ class IQL(nn.Module):
     def __init__(self,
                 state_size,
                 action_size,
-                learning_rate,
+                actor_lr,
+                critic_lr,
                 hidden_size,
                 tau,
                 gamma,
@@ -22,7 +23,8 @@ class IQL(nn.Module):
                 ): 
         super(IQL, self).__init__()
         self.device = device
-        self.learning_rate = learning_rate
+        self.actor_lr = actor_lr
+        self.critic_lr = critic_lr
         self.tau = tau
         self.gamma = torch.FloatTensor([gamma]).to(device)
         self.hard_update_every = hard_update_every
@@ -33,7 +35,7 @@ class IQL(nn.Module):
            
         # Actor Network 
         self.actor_local = Actor(hidden_size, seed).to(device)
-        self.actor_optimizer = optim.Adam(self.actor_local.parameters(), lr=learning_rate)     
+        self.actor_optimizer = optim.Adam(self.actor_local.parameters(), lr=actor_lr)     
         
         # Critic Network (w/ Target Network)
         self.critic1 = Critic(hidden_size, 2).to(device)
@@ -47,12 +49,12 @@ class IQL(nn.Module):
         self.critic2_target = Critic(hidden_size).to(device)
         self.critic2_target.load_state_dict(self.critic2.state_dict())
 
-        self.critic1_optimizer = optim.Adam(self.critic1.parameters(), lr=learning_rate)
-        self.critic2_optimizer = optim.Adam(self.critic2.parameters(), lr=learning_rate) 
+        self.critic1_optimizer = optim.Adam(self.critic1.parameters(), lr=critic_lr)
+        self.critic2_optimizer = optim.Adam(self.critic2.parameters(), lr=critic_lr) 
         
         self.value_net = Value(hidden_size).to(device)
         
-        self.value_optimizer = optim.Adam(self.value_net.parameters(), lr=learning_rate)
+        self.value_optimizer = optim.Adam(self.value_net.parameters(), lr=critic_lr)
         self.step = 0
 
     

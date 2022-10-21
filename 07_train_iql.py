@@ -25,7 +25,8 @@ def get_config():
     parser.add_argument('--config', type=str, default='config/setcover/config_iql_mdp.json', help='path to yaml config file')
     parser.add_argument("--algo_name", type=str, default="IQL", help="Run name, default: SAC")
     parser.add_argument("--hidden_size", type=int, default=64, help="")
-    parser.add_argument("--lr", type=float, default=3e-4, help="learning_rate")
+    parser.add_argument("--actor_lr", type=float, default=3e-4, help="actor learning_rate")
+    parser.add_argument("--critic_lr", type=float, default=3e-4, help="critic learning_rate")
     parser.add_argument("--temperature", type=float, default=3, help="")
     parser.add_argument("--expectile", type=float, default=0.7, help="")
     parser.add_argument("--tau", type=float, default=5e-3, help="")
@@ -33,15 +34,17 @@ def get_config():
     parser.add_argument("--hard_update_every", type=int, default=10, help="")
     parser.add_argument("--clip_grad_param", type=int, default=100, help="")
 
-    parser.add_argument("--max_epochs", type=int, default=200, help="Number of max_epochs, default: 1000")
-    parser.add_argument("--save_every", type=int, default=100, help="Saves the network every x epochs, default: 25")
-    parser.add_argument("--eval_every", type=int, default=1, help="")
+    parser.add_argument("--max_epochs", type=int, default=100, help="Number of max_epochs, default: 1000")
+    parser.add_argument("--save_every", type=int, default=10, help="Saves the network every x epochs, default: 25")
+    parser.add_argument("--eval_every", type=int, default=3, help="")
+    parser.add_argument("--eval_run", type=int, default=30, help="")
     parser.add_argument("--batch_size", type=int, default=32, help="Batch size, default: 256")
     parser.add_argument("--valid_batch_size", type=int, default=128, help="Valid Batch size, default: 256")
     parser.add_argument("--num_valid_instances", type=int, default=1000, help="Number of valid instances for branch_env")
+    parser.add_argument("--num_train_samples", type=int, default=10000, help="Number of train samples in every epoch")
     
     parser.add_argument('--problem',help='MILP instance type to process.',choices=['setcover', 'cauctions', 'ufacilities', 'indset', 'mknapsack'],default='setcover',)
-    parser.add_argument("--mode", type=str, default='mdp', help="Mode for branch env")
+    parser.add_argument("--mode", type=str, default='mdp', choices=['mdp', 'tmdp+ObjLim', 'tmdp+DFS'], help="Mode for branch env")
     parser.add_argument("--time_limit", type=int, default=4000, help="Timelimit of the solver")
     parser.add_argument("--sample_rate", type=float, default=0.05, help="")
 
@@ -59,7 +62,7 @@ def get_config():
     args_config = {key: getattr(args, key) for key in config.keys() & vars(args).keys()}
     config.update(args_config)
 
-    config['hard_update_every'] = int(np.floor(10000/config['batch_size']))
+    config['hard_update_every'] = int(np.floor(config['num_train_samples']/config['batch_size']))
     ### Device SETUP ###
     if config['gpu'] == -1:
         os.environ['CUDA_VISIBLE_DEVICES'] = ''
@@ -93,7 +96,7 @@ def get_config():
         raise NotImplementedError
     config['maximization'] = maximization
         # model path
-    cur_name = '{}-{}-{}'.format(config['algo_name'], datetime.datetime.now().strftime('%Y-%m-%d_%H-%M-%S'),  config['mode'])
+    cur_name = '{}-{}-{}'.format(config['algo_name'],  config['mode'], datetime.datetime.now().strftime('%Y-%m-%d_%H-%M-%S'))
     token = '{}/{}'.format(config['problem'], cur_name)
     model_dir = osp.realpath(osp.join('results', token))
     config['model_dir'] = model_dir
@@ -111,7 +114,7 @@ def get_config():
     config['problem_folder'] = problem_folders[config['problem']]
     return config
 
-def evaluate(env, policy, eval_runs=20): 
+def evaluate(env, policy, eval_runs,logger): 
     """
     Makes an evaluation run with the current policy
     """
@@ -128,6 +131,7 @@ def evaluate(env, policy, eval_runs=20):
             iter_count += 1
             if done:
                 break
+        logger.info(f'Eval Task:{i}, {env.instance},Total Reward:{rewards}, NNodes:{info["nnodes"]},Lpiters:{info["lpiters"]},Time:{info["time"]}')
         stats.append({'task':env.instance,'info':info})
         reward_batch.append(rewards)
     return reward_batch, stats
@@ -162,7 +166,8 @@ def train(config):
     
     agent = IQL(state_size=env.observation_space.shape[0],
                 action_size=env.action_space.shape[0],
-                learning_rate=config['lr'],
+                actor_lr=config['actor_lr'],
+                critic_lr=config['critic_lr'],
                 hidden_size=config['hidden_size'],
                 tau=config['tau'],
                 gamma=config['gamma'],
@@ -174,13 +179,13 @@ def train(config):
                 device=config['device'])
     scheduler = Scheduler(agent.actor_optimizer, mode='min', patience=10, factor=0.2, verbose=True)
     rng = np.random.RandomState(config['seed'])
-    eval_reward,_ = evaluate(env, agent)
+    eval_reward,_ = evaluate(env, agent,config['eval_run'], logger)
     best_tree_size = np.inf
     logger.info(f"Test Reward: {eval_reward}, Episode: 0, Batches: {batches}")
     for epoch in range(0, config['max_epochs']+1):
         logger.info(f'** Epoch {epoch}')
         wandb_data = {}
-        epoch_train_files = rng.choice(train_files, int(np.floor(10000/config['batch_size']))*config['batch_size'], replace=True)
+        epoch_train_files = rng.choice(train_files, config['hard_update_every']*config['batch_size'], replace=True)
         train_data = BuildFullTransition(epoch_train_files)
         train_loader = torch_geometric.data.DataLoader(train_data, config['batch_size'], shuffle=True)
         policy_losses, critic1_losses, critic2_losses, value_losses = [],[],[],[]
@@ -194,7 +199,7 @@ def train(config):
             batches += 1
 
         if epoch % config['eval_every'] == 0:
-            eval_reward, v_stats = evaluate(env, agent)
+            eval_reward, v_stats = evaluate(env, agent,config['eval_run'], logger)
             v_nnodess = [s['info']['nnodes'] for s in v_stats]
             v_lpiterss = [s['info']['lpiters'] for s in v_stats]
             v_times = [s['info']['time'] for s in v_stats]
@@ -203,6 +208,7 @@ def train(config):
                 'valid_reward':np.mean(eval_reward),
                 'valid_nnodes_g': gmean(np.asarray(v_nnodess) + 1) - 1,
                 'valid_nnodes': np.mean(v_nnodess),
+                'valid_nnodes_std': np.std(v_nnodess),
                 'valid_nnodes_max': np.amax(v_nnodess),
                 'valid_nnodes_min': np.amin(v_nnodess),
                 'valid_time': np.mean(v_times),
@@ -222,7 +228,7 @@ def train(config):
                 if config['wandb']:
                     save(config, config['model_dir'],model=agent, wandb=wandb)
             average10.append(eval_reward)
-            logger.info(f"Episode: {epoch} | Reward: {eval_reward} | Polciy Loss: {np.mean(policy_losses)} | Batches: {batches}")
+        logger.info(f"Episode: {epoch} | Batches: {batches} | Polciy Loss: {np.mean(policy_losses)}  | Value Loss: {np.mean(value_losses)} | Critic Loss: {np.mean(critic1_losses)} ")
         
         wandb_data.update({
             "Valid_reward10": np.mean(average10),

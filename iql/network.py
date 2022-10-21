@@ -269,5 +269,5 @@ class Value(GNNPolicy):
     def forward(self, state):
         constraint_features, edge_indices, edge_features, variable_features,candidates,nb_candidates = state
         value = super().forward(constraint_features, edge_indices, edge_features, variable_features)
-        value = pad_tensor(value[candidates], nb_candidates)
-        return torch.mean(value, dim=1).unsqueeze(-1)
+        value = pad_tensor(value[candidates], nb_candidates,value=True)
+        return value

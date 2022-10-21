@@ -148,10 +148,13 @@ def extract_state(observation, action_set, node_id):
     return state
 
 
-def pad_tensor(input_, pad_sizes, pad_value=-1e8):
+def pad_tensor(input_, pad_sizes, value=False, pad_value=-1e8):
     max_pad_size = pad_sizes.max()
     output = input_.split(pad_sizes.cpu().numpy().tolist())
-    output = torch.stack([F.pad(slice_, (0, max_pad_size-slice_.size(0)), 'constant', pad_value)
+    if value:
+        output = torch.stack([torch.mean(slice_) for slice_ in output], dim=0).unsqueeze(-1)
+    else:
+        output = torch.stack([F.pad(slice_, (0, max_pad_size-slice_.size(0)), 'constant', pad_value)
                           for slice_ in output], dim=0)
     return output
 
