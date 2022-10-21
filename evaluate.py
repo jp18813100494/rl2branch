@@ -38,7 +38,7 @@ if __name__ == "__main__":
     instances = []
     seeds = [0, 1, 2, 3, 4]
     internal_branchers = ['relpscost']
-    gcnn_models = ['il', 'mdp', 'tmdp+DFS', 'tmdp+ObjLim']
+    gcnn_models = ['il', 'mdp', 'tmdp+DFS', 'tmdp+ObjLim','iql']
     time_limit = 3600
 
     if args.problem == 'setcover':
@@ -114,6 +114,8 @@ if __name__ == "__main__":
                     model.load_state_dict(torch.load(f'actor/{args.problem}/0/tmdp+DFS.pkl'))
                 elif policy['name'] == 'tmdp+ObjLim':
                     model.load_state_dict(torch.load(f'actor/{args.problem}/0/tmdp+ObjLim.pkl'))
+                elif policy['name'] == 'iql':
+                    model.load_state_dict(torch.load(f'actor/{args.problem}/0/iql.pth'))
                 else:
                     raise Exception(f"Unrecognized GNN policy {policy[name]}")
                 loaded_models[policy['name']] = model

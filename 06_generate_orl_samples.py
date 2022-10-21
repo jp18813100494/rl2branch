@@ -110,12 +110,6 @@ def make_samples(in_queue, out_queue, stop_flag):
             focus_node_obs = observation["focus_node"]
             node_observation = observation["node_observation"]
             state = utilities.extract_state(node_observation, action_set, focus_node_obs.number)
-            # state = {'constraint_features':node_observation.row_features,
-            #             'edge_index':node_observation.edge_features.indices,
-            #             'edge_attr':node_observation.edge_features.values,
-            #             'variable_features':node_observation.column_features,
-            #             'action_set':action_set,
-            #             'node_id': focus_node_obs.number}
 
             action = action_set[scores[action_set].argmax()]
             try:
@@ -125,12 +119,6 @@ def make_samples(in_queue, out_queue, stop_flag):
                     focus_node_obs_n = next_observation["focus_node"]
                     node_observation_n = next_observation["node_observation"]
                     next_state = utilities.extract_state(node_observation_n, action_set_n, focus_node_obs_n.number)
-                    # next_state = {'constraint_features':node_observation_n.row_features,
-                    #                     'edge_index':node_observation_n.edge_features.indices,
-                    #                     'edge_attr':node_observation_n.edge_features.values,
-                    #                     'variable_features':node_observation_n.column_features,
-                    #                     'action_set':action_set_n,
-                    #                     'node_id': focus_node_obs_n.number}
                     data = [state, action, scores, reward,  done, next_state]
                     filename = f'{out_dir}/sample_{episode}_{sample_counter}.pkl'
 
