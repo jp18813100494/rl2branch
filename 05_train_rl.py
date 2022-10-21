@@ -20,7 +20,6 @@ import ecole
 from pathlib import Path
 from datetime import datetime
 from scipy.stats.mstats import gmean
-import datetime
 
 
 
@@ -110,7 +109,7 @@ if __name__ == '__main__':
     rng = np.random.RandomState(config['seed'])
     torch.manual_seed(config['seed'])
 
-    cur_name = '{}-{}-{}-{}'.format('RL',  args.mode, args.problem, datetime.datetime.now().strftime('%Y-%m-%d_%H-%M-%S'))
+    cur_name = '{}-{}-{}-{}'.format('RL',  args.mode, args.problem, datetime.now().strftime('%Y-%m-%d_%H-%M-%S'))
     logger = utilities.configure_logging()
     if args.wandb:
         import wandb
