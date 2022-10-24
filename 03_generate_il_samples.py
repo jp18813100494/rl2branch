@@ -223,7 +223,6 @@ def collect_samples(instances, out_dir, rng, n_samples, n_jobs,
             buffer[current_episode] = []
 
             for sample in samples_to_write:
-
                 # if no more samples here, move to next episode
                 if sample['type'] == 'done':
                     del buffer[current_episode]

@@ -16,6 +16,7 @@ import numpy as np
 import ecole
 import utilities
 from collections import namedtuple
+from envs.branch_env import ObjLimBranchingEnv,DFSBranchingEnv,MDPBranchingEnv
 
 
 class ExploreThenStrongBranch:
@@ -37,7 +38,7 @@ class ExploreThenStrongBranch:
             return (self.pseudocosts_function.extract(model,done), False)
 
 
-def send_orders(orders_queue, instances, seed, query_expert_prob, time_limit, out_dir, stop_flag, agent=None):
+def send_orders(orders_queue, instances, seed, query_expert_prob, time_limit, out_dir, stop_flag, agent=None, train_sols=None, mode="mdp", eps=-0.1):
     """
     Continuously send sampling orders to workers (relies on limited
     queue capacity).
@@ -65,7 +66,7 @@ def send_orders(orders_queue, instances, seed, query_expert_prob, time_limit, ou
     while not stop_flag.is_set():
         instance = rng.choice(instances)
         seed = rng.randint(2**32)
-        orders_queue.put([episode, instance, seed, query_expert_prob, time_limit, out_dir, agent])
+        orders_queue.put([episode, instance, seed, query_expert_prob, time_limit, out_dir, agent, train_sols, mode, eps])
         episode += 1
 
 
@@ -83,17 +84,41 @@ def make_samples(in_queue, out_queue, stop_flag):
     """
     sample_counter = 0
     while not stop_flag.is_set():
-        episode, instance, seed, query_expert_prob, time_limit, out_dir, agent = in_queue.get()
+        episode, instance, seed, query_expert_prob, time_limit, out_dir, agent, train_sols, mode, eps = in_queue.get()
 
-        scip_parameters = {'separating/maxrounds': 0, 'presolving/maxrestarts': 0,
-                           'limits/time': time_limit, 'timing/clocktype': 2}
+        scip_params = {'separating/maxrounds': 0, 'presolving/maxrestarts': 0,
+                        'limits/time': time_limit, 'timing/clocktype': 2}
         observation_function = { "scores": ExploreThenStrongBranch(expert_probability=query_expert_prob),
                                 "focus_node":ecole.observation.FocusNode(),
-                                 "node_observation": ecole.observation.NodeBipartite() }
+                                "node_observation": ecole.observation.NodeBipartite() }
         reward_function= ecole.reward.NNodes()
-        env = ecole.environment.Branching(observation_function=observation_function,reward_function=reward_function,
-                                          scip_params=scip_parameters, pseudo_candidates=True)
-
+        information_function={
+            'nnodes': ecole.reward.NNodes().cumsum(),
+            'lpiters': ecole.reward.LpIterations().cumsum(),
+            'time': ecole.reward.SolvingTime().cumsum()
+        }
+        # env = ecole.environment.Branching(observation_function=observation_function,reward_function=reward_function,
+        #                                 scip_params=scip_parameters, pseudo_candidates=True)
+        if mode == 'tmdp+ObjLim':
+            env = ObjLimBranchingEnv(scip_params=scip_params,
+                                          pseudo_candidates=False,
+                                          observation_function=observation_function,
+                                          reward_function=reward_function,
+                                          information_function=information_function)
+        elif mode == 'tmdp+DFS':
+            env = DFSBranchingEnv(scip_params=scip_params,
+                                       pseudo_candidates=False,
+                                       observation_function=observation_function,
+                                       reward_function=reward_function,
+                                       information_function=information_function)
+        elif mode == 'mdp':
+            env = MDPBranchingEnv(scip_params=scip_params,
+                                       pseudo_candidates=False,
+                                       observation_function=observation_function,
+                                       reward_function=reward_function,
+                                       information_function=information_function)
+        else:
+            raise NotImplementedError
         print(f"[w {threading.current_thread().name}] episode {episode}, seed {seed}, "
               f"processing instance '{instance}'...\n", end='')
         out_queue.put({
@@ -104,25 +129,19 @@ def make_samples(in_queue, out_queue, stop_flag):
         })
 
         env.seed(seed)
-        observation, action_set, reward, done, _ = env.reset(instance)
+        sol = train_sols[instance]
+        observation, action_set, reward, done, _ = env.reset(instance = instance,primal_bound=sol+eps,training=False)
         while not done:
             scores, scores_are_expert = observation["scores"]
             focus_node_obs = observation["focus_node"]
             node_observation = observation["node_observation"]
             state = utilities.extract_state(node_observation, action_set, focus_node_obs.number)
-            if agent is None:
-                action = action_set[scores[action_set].argmax()]
-            else:
-                action = action_set[agent.get_action(state,eval=True)]
+            
+            action = action_set[agent.get_action(state,eval=True)]
             try:
                 next_observation, action_set_n, reward, done, _ = env.step(action)
 
-                if agent is None:
-                    sample_next = scores_are_expert and not stop_flag.is_set()
-                else:
-                    sample_next = not stop_flag.is_set()
-
-                if sample_next:
+                if not stop_flag.is_set():
                     focus_node_obs_n = next_observation["focus_node"]
                     node_observation_n = next_observation["node_observation"]
                     next_state = utilities.extract_state(node_observation_n, action_set_n, focus_node_obs_n.number)
@@ -265,7 +284,7 @@ def collect_samples(instances, out_dir, rng, n_samples, n_jobs,
 
     shutil.rmtree(tmp_samples_dir, ignore_errors=True)
 
-def collect_online(instances, tmp_samples_dir, rng, n_samples, n_jobs, query_expert_prob, time_limit, agent):
+def collect_online(instances, train_sols, tmp_samples_dir, rng, agent, config):
     """
     Runs branch-and-bound episodes on the given set of instances, and collects
     randomly (state, action) pairs from the 'vanilla-full strong' expert
@@ -289,17 +308,23 @@ def collect_online(instances, tmp_samples_dir, rng, n_samples, n_jobs, query_exp
         Maximum running time for an episode, in seconds.
     """
     os.makedirs(tmp_samples_dir, exist_ok=True)
-
+    n_samples = config["epoch_train_size"]
+    n_jobs = config["njobs"]
+    query_expert_prob = config["query_expert_prob"]
+    time_limit = config['time_limit']
+    mode = config["mode"]
+    eps = config["eps"]
     # start workers
     orders_queue = queue.Queue(maxsize=2*n_jobs)
     answers_queue = queue.SimpleQueue()
-
+    
     # start dispatcher
     dispatcher_stop_flag = threading.Event()
     dispatcher = threading.Thread(
             target=send_orders,
             args=(orders_queue, instances, rng.randint(2**32), query_expert_prob,
-                  time_limit, tmp_samples_dir, dispatcher_stop_flag, agent),
+                  time_limit, tmp_samples_dir, dispatcher_stop_flag, agent, train_sols,
+                  mode, eps),
             daemon=True)
     dispatcher.start()
 
@@ -319,7 +344,7 @@ def collect_online(instances, tmp_samples_dir, rng, n_samples, n_jobs, query_exp
     i = 0
     in_buffer = 0
     file_names = []
-    while i < n_samples:
+    while i + in_buffer < n_samples:
         sample = answers_queue.get()
 
         # add received sample to buffer
@@ -362,6 +387,7 @@ def collect_online(instances, tmp_samples_dir, rng, n_samples, n_jobs, query_exp
 
     # # stop all workers
     workers_stop_flag.set()
+    #TODO;加一个所有进程结束的信号
     return file_names
 
 if __name__ == '__main__':

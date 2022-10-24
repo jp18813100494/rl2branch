@@ -45,12 +45,13 @@ def get_config():
     parser.add_argument("--valid_batch_size", type=int, default=128, help="Valid Batch size, default: 256")
     parser.add_argument("--num_valid_instances", type=int, default=1000, help="Number of valid instances for branch_env")
     parser.add_argument("--epoch_train_size", type=int, default=1000, help="Number of train samples in every epoch")
-    parser.add_argument("--njobs", type=int, default=12, help='Number of parallel jobs.')
+    parser.add_argument("--njobs", type=int, default=4, help='Number of parallel jobs.')
     parser.add_argument("--num_repeat", type=int, default=5, help='Number of repeat for sample data')
     parser.add_argument("--node_record_prob", type=float, default=1.0, help='Probability for recording tree nodes')
+    parser.add_argument("--query_expert_prob", type=float, default=1.0, help='Probability for query the expert')
     parser.add_argument("--init_stat", type=str, default='offline', choices=['offline', 'online'], help="Init stat for agent")
     
-    parser.add_argument('--problem',help='MILP instance type to process.',choices=['setcover', 'cauctions', 'ufacilities', 'indset', 'mknapsack'],default='setcover',)
+    parser.add_argument('--problem',default='setcover',choices=['setcover', 'cauctions', 'ufacilities', 'indset', 'mknapsack'],help='MILP instance type to process.')
     parser.add_argument("--mode", type=str, default='mdp', choices=['mdp', 'tmdp+ObjLim', 'tmdp+DFS'], help="Mode for branch env")
     parser.add_argument("--time_limit", type=int, default=4000, help="Timelimit of the solver")
     parser.add_argument("--sample_rate", type=float, default=1.0, help="")
@@ -116,7 +117,7 @@ def get_config():
     config['out_dir'] = out_dir
     config['time_limit'] = time_limit if time_limit is not None else config["time_limit"]
     config['maximization'] = maximization
-        # model path
+    # model path
     cur_name = '{}-{}-{}-{}'.format(config['algo_name'],  config['mode'], config['problem'],  datetime.datetime.now().strftime('%Y-%m-%d_%H-%M-%S'))
     token = '{}/{}'.format(config['problem'], cur_name)
     model_dir = osp.realpath(osp.join('results', token))
@@ -157,9 +158,10 @@ def train(config):
     logger.info(f"Training on {len(train_files)} training instances and {len(valid_instances)} validation instances")
     # collect the pre-computed optimal solutions for the training instances
     with open(f"{config['train_path']}/instance_solutions.json", "r") as f:
-         train_sols = json.load(f)
+        train_sols = json.load(f)
     with open(f"{config['valid_path']}/instance_solutions.json", "r") as f:
         valid_sols = json.load(f)
+    config["eps"] = -0.1 if config['maximization'] else 0.1
     env = branch_env(valid_instances,valid_sols,config)
 
     batches = 0
@@ -168,6 +170,7 @@ def train(config):
     
     agent = IQL(state_size=env.observation_space.shape[0],
                 action_size=env.action_space.shape[0],
+                config=config,
                 actor_lr=config['actor_lr'],
                 critic_lr=config['critic_lr'],
                 hidden_size=config['hidden_size'],
@@ -181,7 +184,7 @@ def train(config):
                 device=config['device'])
     scheduler = Scheduler(agent.actor_optimizer, mode='min', patience=10, factor=0.2, verbose=True)
     rng = np.random.RandomState(config['seed'])
-  
+    env.seed(config["seed"])
     v_reward,_ = evaluate(env, agent,config['eval_run'], logger)
     logger.info(f"Test Reward: {v_reward}, Episode: 0, Batches: {batches}")
     config['best_tree_size'] = np.inf
@@ -194,10 +197,7 @@ def train(config):
         else:
             tmp_samples_dir = f'{config["out_dir"]}/train/tmp'
             os.makedirs(tmp_samples_dir, exist_ok=True)
-            epoch_train_files = collect_online(train_instances, tmp_samples_dir, rng, config["epoch_train_size"],
-                    config["njobs"], query_expert_prob=config["node_record_prob"],
-                    time_limit=config["time_limit"], agent=agent)
-            epoch_train_files = config['num_repeat']*epoch_train_files
+            epoch_train_files = collect_online(train_instances, train_sols, tmp_samples_dir, rng, agent,config)
             train_data = BuildFullTransition(epoch_train_files)
             shutil.rmtree(tmp_samples_dir, ignore_errors=True)
         train_loader = torch_geometric.data.DataLoader(train_data, config['batch_size'], shuffle=True)

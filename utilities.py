@@ -328,13 +328,15 @@ def evaluate(env, policy, eval_runs,logger):
     """
     reward_batch = []
     stats = []
+    
     for i in range(eval_runs):
-        state = env.reset()
+        _,action_set,_,_,_ = env.reset()
         iter_count = 0
         rewards = 0
         while True:
-            action = policy.get_action(state, eval=True)
-            state, reward, done, info = env.step(action)
+            action_idx = policy.get_action(env.state, eval=True)
+            action = action_set[action_idx]
+            observation, action_set, reward, done, info = env.step(action)
             rewards += reward
             iter_count += 1
             if done:

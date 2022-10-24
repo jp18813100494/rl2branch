@@ -25,6 +25,7 @@
     "njobs": 12,
     "num_repeat":3,
     "node_record_prob": 1.0,
+    "query_expert_prob": 1.0,
     "init_stat": "offline",
 
     "problem": "setcover",

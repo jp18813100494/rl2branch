@@ -1,4 +1,5 @@
 import torch
+import torch_geometric
 import torch.optim as optim
 import torch.nn as nn
 from torch.nn.utils import clip_grad_norm_
@@ -9,6 +10,7 @@ class IQL(nn.Module):
     def __init__(self,
                 state_size,
                 action_size,
+                config,
                 actor_lr,
                 critic_lr,
                 hidden_size,
@@ -22,6 +24,7 @@ class IQL(nn.Module):
                 device
                 ): 
         super(IQL, self).__init__()
+        self.config = config
         self.device = device
         self.actor_lr = actor_lr
         self.critic_lr = critic_lr
@@ -58,6 +61,35 @@ class IQL(nn.Module):
         self.step = 0
 
     
+    def sample_action_idx(self, states, greedy):
+        #TODO； revise for efficient evaluation
+        if isinstance(greedy, bool):
+            greedy = torch.tensor(np.repeat(greedy, len(states), dtype=torch.long))
+        elif not isinstance(greedy, torch.Tensor):
+            greedy = torch.tensor(greedy, dtype=torch.long)
+
+        states_loader = torch_geometric.data.DataLoader(states, batch_size=self.config['batch_size'])
+        greedy_loader = torch.utils.data.DataLoader(torch.utils.data.TensorDataset(greedy), batch_size=self.config['batch_size'])
+        eval = greedy
+        action_idxs = []
+        for batch, (greedy,) in zip(states_loader, greedy_loader):
+            with torch.no_grad():
+                batch = batch.to(self.device)
+                
+                logits = self.actor_local(batch, eval)
+                # logits = logits[batch.action_set]
+
+                logits_end = batch.action_set_size.cumsum(-1)
+                logits_start = logits_end - batch.action_set_size
+                for start, end, greedy in zip(logits_start, logits_end, greedy):
+                    if greedy:
+                        action_idx = logits[start:end].argmax()
+                    else:
+                        action_idx = torch.distributions.categorical.Categorical(logits=logits[start:end]).sample()
+                    action_idxs.append(action_idx.item())
+
+        return action_idxs
+
     def get_action(self, state, eval=False):
         """Returns actions for given state as per current policy."""
         state = state.to(self.device)
