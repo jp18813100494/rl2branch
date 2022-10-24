@@ -234,7 +234,7 @@ class Actor(GNNPolicy):
         action_logits = self.forward(state,eval)
         dist = Categorical(logits=action_logits)
         action = dist.sample()
-        return action,dist
+        return action, dist
 
     def get_action(self,state,eval=False):
         action_logits = self.forward(state,eval)

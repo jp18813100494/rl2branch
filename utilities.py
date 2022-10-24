@@ -5,14 +5,20 @@ from tkinter import N
 import ecole
 import pickle
 import logging
+import threading
 import glog
 import itertools
 import numpy as np
 import torch
 import torch.nn.functional as F
 import torch_geometric
+import torch.multiprocessing as mp
+from torch.multiprocessing import Process
 from datetime import datetime
 from pathlib import Path
+from scipy.stats.mstats import gmean
+from iql.iql_agent import save
+
 
 
 def log(str, logfile=None):
@@ -313,3 +319,104 @@ def configure_logging(header=""):
     handler_console.setFormatter(formatter)
     logger.addHandler(handler_console)
     return logger
+
+def evaluate(env, policy, eval_runs,logger): 
+    """
+    Makes an evaluation run with the current policy
+    """
+    reward_batch = []
+    stats = []
+    for i in range(eval_runs):
+        state = env.reset()
+        iter_count = 0
+        rewards = 0
+        while True:
+            action = policy.get_action(state, eval=True)
+            state, reward, done, info = env.step(action)
+            rewards += reward
+            iter_count += 1
+            if done:
+                break
+        logger.info(f'Eval Task:{i}, {env.instance},Total Reward:{rewards}, NNodes:{info["nnodes"]},Lpiters:{info["lpiters"]},Time:{info["time"]}')
+        stats.append({'task':env.instance,'info':info})
+        reward_batch.append(rewards)
+    return reward_batch, stats
+
+
+def evaluate_single(i, queue, env, policy,logger): 
+    """
+    Makes an evaluation run with the current policy
+    """
+
+    state = env.reset()
+    count = 0
+    rewards = 0
+    while True:
+        action = policy.get_action(state, eval=True)
+        state, reward, done, info = env.step(action)
+        rewards += reward
+        count += 1
+        if done:
+            break
+    logger.info(f'Eval Task:{i}, {env.instance},Total Reward:{rewards}, Episode:{count} NNodes:{info["nnodes"]},Lpiters:{info["lpiters"]},Time:{info["time"]}')
+    stat = {'task':env.instance,'info':info}
+    queue.put((rewards,stat,count))
+
+def evaluate_parellel(env, policy, config, logger):
+    """
+    Make an evaluation run with parellerl agents
+    """
+    #TODO:
+    eval_run, num_workers = config['eval_run'], config['num_workers']
+    rewards, stats, ep_lens =[], [],[]
+    assert eval_run>=num_workers
+    cnt = eval_run//num_workers
+    for i in range(cnt):
+        info_queue = mp.Queue()
+        processes = []
+        for j in range(num_workers):
+            process = Process(target=evaluate_single, args=(i*num_workers+j, info_queue, env, policy, logger))
+            process.daemon = True
+            processes.append(process)
+        [p.start() for p in processes]
+        while True:
+            total_reward, stat,ep_len = info_queue.get()
+            if total_reward is not None:
+                rewards.append(total_reward)
+                stats.append(stat)
+                ep_lens.append(ep_len)
+            else:
+                break
+        [p.join() for p in processes]
+    return rewards, stats, ep_lens
+
+def wandb_eval_log(epoch, agent, wandb, wandb_data, v_stats, v_reward, config, logger,stat='offline'):
+    v_nnodess = [s['info']['nnodes'] for s in v_stats]
+    v_lpiterss = [s['info']['lpiters'] for s in v_stats]
+    v_times = [s['info']['time'] for s in v_stats]
+
+    wandb_data.update({
+        'valid_reward':np.mean(v_reward),
+        # 'valid_episode_lens':np.mean(v_ep_lens),
+        'valid_nnodes_g': gmean(np.asarray(v_nnodess) + 1) - 1,
+        'valid_nnodes': np.mean(v_nnodess),
+        'valid_nnodes_std': np.std(v_nnodess),
+        'valid_nnodes_max': np.amax(v_nnodess),
+        'valid_nnodes_min': np.amin(v_nnodess),
+        'valid_time': np.mean(v_times),
+        'valid_lpiters': np.mean(v_lpiterss),
+    })
+    if epoch == 0:
+        v_nnodes_0 = wandb_data['valid_nnodes'] if wandb_data['valid_nnodes'] != 0 else 1
+        v_nnodes_g_0 = wandb_data['valid_nnodes_g'] if wandb_data['valid_nnodes_g']!= 0 else 1
+    wandb_data.update({
+        'valid_nnodes_norm': wandb_data['valid_nnodes'] / v_nnodes_0,
+        'valid_nnodes_g_norm': wandb_data['valid_nnodes_g'] / v_nnodes_g_0,
+    })
+
+    if wandb_data['valid_nnodes_g'] < config['best_tree_size']:
+        config['best_tree_size'] = wandb_data['valid_nnodes_g']
+        logger.info('Best parameters so far (1-shifted geometric mean), saving model.')
+        if config['wandb']:
+            save(config, model=agent, wandb=wandb ,stat=stat)
+    return wandb_data

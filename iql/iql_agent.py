@@ -168,21 +168,21 @@ def loss(diff, expectile=0.8):
     weight = torch.where(diff > 0, expectile, (1 - expectile))
     return weight * (diff**2)
 
-def save(config,  model_dir, model, wandb, ep=None):
+def save(config, model, wandb, stat="offline",ep=None):
     import os
-    if not os.path.exists(model_dir):
-        os.makedirs(model_dir, exist_ok=True)
+    if not os.path.exists(config["model_dir"]):
+        os.makedirs(config["model_dir"], exist_ok=True)
     if not ep == None:
-        torch.save(model.actor_local.state_dict(), model_dir +'/actor_'+ str(ep) + ".pth")
-        wandb.save(model_dir +'/actor_'+ str(ep) + ".pth")
-        torch.save(model.critic1.state_dict(), model_dir +'/critic1_'+ str(ep) + ".pth")
-        wandb.save(model_dir +'/critic1_'+ str(ep) + ".pth")
-        torch.save(model.value_net.state_dict(), model_dir +'/value_'+ str(ep) + ".pth")
-        wandb.save(model_dir +'/critic1_'+ str(ep) + ".pth")
+        torch.save(model.actor_local.state_dict(), config["model_dir"] +'/actor_'+ stat + str(ep) + ".pth")
+        wandb.save(config["model_dir"] +'/actor_'+ str(ep) + ".pth")
+        torch.save(model.critic1.state_dict(), config["model_dir"] +'/critic1_'+ stat + str(ep) + ".pth")
+        wandb.save(config["model_dir"] +'/critic1_'+ str(ep) + ".pth")
+        torch.save(model.value_net.state_dict(), config["model_dir"] +'/value_'+ stat + str(ep) + ".pth")
+        wandb.save(config["model_dir"] +'/critic1_'+ str(ep) + ".pth")
     else:
-        torch.save(model.actor_local.state_dict(), model_dir +'/actor_'+ "best.pth")
-        wandb.save(model_dir +'/actor_'+ "best.pth")
-        torch.save(model.critic1.state_dict(), model_dir +'/critic1_'+ "best.pth")
-        wandb.save(model_dir +'/critic1_'+ "best.pth")
-        torch.save(model.value_net.state_dict(), model_dir +'/value_'+ "best.pth")
-        wandb.save(model_dir +'/value_'+ "best.pth")
+        torch.save(model.actor_local.state_dict(), config["model_dir"] +'/actor_'+ stat + "best.pth")
+        wandb.save(config["model_dir"] +'/actor_'+ "best.pth")
+        torch.save(model.critic1.state_dict(), config["model_dir"] +'/critic1_'+ stat + "best.pth")
+        wandb.save(config["model_dir"] +'/critic1_'+ "best.pth")
+        torch.save(model.value_net.state_dict(), config["model_dir"] +'/value_' +stat+ "best.pth")
+        wandb.save(config["model_dir"] +'/value_'+ "best.pth")

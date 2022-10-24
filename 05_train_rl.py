@@ -19,7 +19,7 @@ import argparse
 import ecole
 from pathlib import Path
 from datetime import datetime
-from scipy.stats.mstats import gmean
+
 
 
 

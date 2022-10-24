@@ -261,6 +261,111 @@ def collect_samples(instances, out_dir, rng, n_samples, n_jobs,
     shutil.rmtree(tmp_samples_dir, ignore_errors=True)
 
 
+#TODO:利用agent完成采样, 模仿06_generate_orl_samples.py里面先生成pkl再读取文件的路数生成train_data
+def collect_online(instances, tmp_samples_dir, rng, n_samples, n_jobs, query_expert_prob, time_limit, agent):
+    """
+    Runs branch-and-bound episodes on the given set of instances, and collects
+    randomly (state, action) pairs from the 'vanilla-full strong' expert
+    brancher.
+    Parameters
+    ----------
+    instances : list
+        Instance files from which to collect samples.
+    out_dir : str
+        Directory in which to write samples.
+    rng : numpy.random.RandomState
+        A random number generator for reproducibility.
+    n_samples : int
+        Number of samples to collect.
+    n_jobs : int
+        Number of jobs for parallel sampling.
+    query_expert_prob : float in [0, 1]
+        Probability of using the expert policy and recording a (state, action)
+        pair.
+    time_limit : float in [0, 1e+20]
+        Maximum running time for an episode, in seconds.
+    """
+    os.makedirs(tmp_samples_dir, exist_ok=True)
+
+    # start workers
+    orders_queue = queue.Queue(maxsize=2*n_jobs)
+    answers_queue = queue.SimpleQueue()
+
+    # tmp_samples_dir = f'{out_dir}/tmp'
+    # os.makedirs(tmp_samples_dir, exist_ok=True)
+
+    # start dispatcher
+    dispatcher_stop_flag = threading.Event()
+    dispatcher = threading.Thread(
+            target=send_orders,
+            args=(orders_queue, instances, rng.randint(2**32), query_expert_prob,
+                  time_limit, tmp_samples_dir, dispatcher_stop_flag, agent),
+            daemon=True)
+    dispatcher.start()
+
+    workers = []
+    workers_stop_flag = threading.Event()
+    for i in range(n_jobs):
+        p = threading.Thread(
+                target=make_samples,
+                args=(orders_queue, answers_queue, workers_stop_flag),
+                daemon=True)
+        workers.append(p)
+        p.start()
+
+    # record answers and write samples
+    buffer = {}
+    current_episode = 0
+    i = 0
+    in_buffer = 0
+    file_names = []
+    while i < n_samples:
+        sample = answers_queue.get()
+
+        # add received sample to buffer
+        if sample['type'] == 'start':
+            buffer[sample['episode']] = []
+        else:
+            buffer[sample['episode']].append(sample)
+            if sample['type'] == 'sample':
+                file_names.append(sample['filename'])
+                in_buffer += 1
+
+        #TODO:这部分还要根据需求重新更改下
+        # if any, write samples from current episode
+        while current_episode in buffer and buffer[current_episode]:
+            samples_to_write = buffer[current_episode]
+            buffer[current_episode] = []
+
+            for sample in samples_to_write:
+                # if no more samples here, move to next episode
+                if sample['type'] == 'done':
+                    del buffer[current_episode]
+                    current_episode += 1
+
+                # else write sample
+                else:
+                    # os.rename(sample['filename'], f'{out_dir}/sample_{i+1}.pkl')
+                    in_buffer -= 1
+                    i += 1
+                    print(f"[m {threading.current_thread().name}] {i} / {n_samples} samples written, "
+                          f"ep {sample['episode']} ({in_buffer} in buffer).\n", end='')
+
+                    # early stop dispatcher
+                    if in_buffer + i >= n_samples and dispatcher.is_alive():
+                        dispatcher_stop_flag.set()
+                        print(f"[m {threading.current_thread().name}] dispatcher stopped...\n", end='')
+
+                    # as soon as enough samples are collected, stop
+                    if i == n_samples:
+                        buffer = {}
+                        break
+
+    # # stop all workers
+    workers_stop_flag.set()
+    # #
+    # shutil.rmtree(tmp_samples_dir, ignore_errors=True)
+
 if __name__ == '__main__':
     parser = argparse.ArgumentParser()
     parser.add_argument(
