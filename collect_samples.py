@@ -113,11 +113,16 @@ def make_samples(in_queue, out_queue, stop_flag):
             if agent is None:
                 action = action_set[scores[action_set].argmax()]
             else:
-                action = agent.get_action(state,eval=True)
+                action = action_set[agent.get_action(state,eval=True)]
             try:
                 next_observation, action_set_n, reward, done, _ = env.step(action)
 
-                if scores_are_expert and not stop_flag.is_set():
+                if agent is None:
+                    sample_next = scores_are_expert and not stop_flag.is_set()
+                else:
+                    sample_next = not stop_flag.is_set()
+
+                if sample_next:
                     focus_node_obs_n = next_observation["focus_node"]
                     node_observation_n = next_observation["node_observation"]
                     next_state = utilities.extract_state(node_observation_n, action_set_n, focus_node_obs_n.number)
@@ -260,8 +265,6 @@ def collect_samples(instances, out_dir, rng, n_samples, n_jobs,
 
     shutil.rmtree(tmp_samples_dir, ignore_errors=True)
 
-
-#TODO:利用agent完成采样, 模仿06_generate_orl_samples.py里面先生成pkl再读取文件的路数生成train_data
 def collect_online(instances, tmp_samples_dir, rng, n_samples, n_jobs, query_expert_prob, time_limit, agent):
     """
     Runs branch-and-bound episodes on the given set of instances, and collects
@@ -290,9 +293,6 @@ def collect_online(instances, tmp_samples_dir, rng, n_samples, n_jobs, query_exp
     # start workers
     orders_queue = queue.Queue(maxsize=2*n_jobs)
     answers_queue = queue.SimpleQueue()
-
-    # tmp_samples_dir = f'{out_dir}/tmp'
-    # os.makedirs(tmp_samples_dir, exist_ok=True)
 
     # start dispatcher
     dispatcher_stop_flag = threading.Event()
@@ -331,7 +331,6 @@ def collect_online(instances, tmp_samples_dir, rng, n_samples, n_jobs, query_exp
                 file_names.append(sample['filename'])
                 in_buffer += 1
 
-        #TODO:这部分还要根据需求重新更改下
         # if any, write samples from current episode
         while current_episode in buffer and buffer[current_episode]:
             samples_to_write = buffer[current_episode]
@@ -363,8 +362,7 @@ def collect_online(instances, tmp_samples_dir, rng, n_samples, n_jobs, query_exp
 
     # # stop all workers
     workers_stop_flag.set()
-    # #
-    # shutil.rmtree(tmp_samples_dir, ignore_errors=True)
+    return file_names
 
 if __name__ == '__main__':
     parser = argparse.ArgumentParser()

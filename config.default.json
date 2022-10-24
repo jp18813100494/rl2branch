@@ -1,9 +1,10 @@
-{
+{   
+    "algo_name":"RL",
     "lr": 1e-6,
 
     "entropy_bonus": 1e-5,
 
-    "num_epochs": 20000,
+    "num_epochs": 5000,
     "time_limit": 4000,
     "num_episodes_per_epoch": 10,
     "sample_rate": 0.05,

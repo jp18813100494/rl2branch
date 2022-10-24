@@ -18,6 +18,7 @@ from datetime import datetime
 from pathlib import Path
 from scipy.stats.mstats import gmean
 from iql.iql_agent import save
+import random
 
 
 
@@ -138,6 +139,7 @@ def BuildFullTransition(data_files):
         state, action, scores, reward, done, next_state = sample['data']
         fulltransition = FullTransition(state,action,scores,reward,done,next_state)
         transitions.append(fulltransition)
+    random.shuffle(transitions)
     return transitions
 
 def extract_state(observation, action_set, node_id):
@@ -397,7 +399,6 @@ def wandb_eval_log(epoch, agent, wandb, wandb_data, v_stats, v_reward, config, l
 
     wandb_data.update({
         'valid_reward':np.mean(v_reward),
-        # 'valid_episode_lens':np.mean(v_ep_lens),
         'valid_nnodes_g': gmean(np.asarray(v_nnodess) + 1) - 1,
         'valid_nnodes': np.mean(v_nnodess),
         'valid_nnodes_std': np.std(v_nnodess),
@@ -409,9 +410,11 @@ def wandb_eval_log(epoch, agent, wandb, wandb_data, v_stats, v_reward, config, l
     if epoch == 0:
         v_nnodes_0 = wandb_data['valid_nnodes'] if wandb_data['valid_nnodes'] != 0 else 1
         v_nnodes_g_0 = wandb_data['valid_nnodes_g'] if wandb_data['valid_nnodes_g']!= 0 else 1
+        config["v_nnodes_0"] = v_nnodes_0
+        config["v_nnodes_g_0"] = v_nnodes_g_0
     wandb_data.update({
-        'valid_nnodes_norm': wandb_data['valid_nnodes'] / v_nnodes_0,
-        'valid_nnodes_g_norm': wandb_data['valid_nnodes_g'] / v_nnodes_g_0,
+        'valid_nnodes_norm': wandb_data['valid_nnodes'] / config["v_nnodes_0"],
+        'valid_nnodes_g_norm': wandb_data['valid_nnodes_g'] / config["v_nnodes_g_0"],
     })
 
     if wandb_data['valid_nnodes_g'] < config['best_tree_size']:

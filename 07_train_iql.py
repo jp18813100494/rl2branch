@@ -39,22 +39,24 @@ def get_config():
     parser.add_argument("--save_every", type=int, default=10, help="Saves the network every x epochs, default: 25")
     parser.add_argument("--eval_every", type=int, default=3, help="")
     parser.add_argument("--eval_run", type=int, default=5, help="")
-    parser.add_argument("--num_workers", type=int, default=8, help="")
+    # parser.add_argument("--num_workers", type=int, default=8, help="")
     parser.add_argument("--num_valid_seeds", type=int, default=12, help="")
     parser.add_argument("--batch_size", type=int, default=32, help="Batch size, default: 256")
     parser.add_argument("--valid_batch_size", type=int, default=128, help="Valid Batch size, default: 256")
     parser.add_argument("--num_valid_instances", type=int, default=1000, help="Number of valid instances for branch_env")
-    parser.add_argument("--epoch_train_size", type=int, default=10000, help="Number of train samples in every epoch")
+    parser.add_argument("--epoch_train_size", type=int, default=1000, help="Number of train samples in every epoch")
     parser.add_argument("--njobs", type=int, default=12, help='Number of parallel jobs.')
+    parser.add_argument("--num_repeat", type=int, default=5, help='Number of repeat for sample data')
     parser.add_argument("--node_record_prob", type=float, default=1.0, help='Probability for recording tree nodes')
+    parser.add_argument("--init_stat", type=str, default='offline', choices=['offline', 'online'], help="Init stat for agent")
     
     parser.add_argument('--problem',help='MILP instance type to process.',choices=['setcover', 'cauctions', 'ufacilities', 'indset', 'mknapsack'],default='setcover',)
     parser.add_argument("--mode", type=str, default='mdp', choices=['mdp', 'tmdp+ObjLim', 'tmdp+DFS'], help="Mode for branch env")
     parser.add_argument("--time_limit", type=int, default=4000, help="Timelimit of the solver")
-    parser.add_argument("--sample_rate", type=float, default=0.05, help="")
+    parser.add_argument("--sample_rate", type=float, default=1.0, help="")
 
     parser.add_argument('--seed',help='Random generator seed.',type=int,default=0)
-    parser.add_argument('--gpu',help='CUDA GPU id (-1 for CPU).',type=int,default=0,)
+    parser.add_argument('--gpu',help='CUDA GPU id (-1 for CPU).',type=int,default=0)
     parser.add_argument('--wandb',help="Use wandb?",default=False,action="store_true")
     args = parser.parse_args()
 
@@ -134,7 +136,6 @@ def get_config():
 
 
 def train(config):
-    #TODO: Data_driven + Environment
     np.random.seed(config['seed'])
     random.seed(config['seed'])
     torch.manual_seed(config['seed'])
@@ -162,7 +163,7 @@ def train(config):
     env = branch_env(valid_instances,valid_sols,config)
 
     batches = 0
-    stat = 'offline'
+    stat = config['init_stat']
     average10 = deque(maxlen=10)
     
     agent = IQL(state_size=env.observation_space.shape[0],
@@ -182,23 +183,23 @@ def train(config):
     rng = np.random.RandomState(config['seed'])
   
     v_reward,_ = evaluate(env, agent,config['eval_run'], logger)
-    config['best_tree_size'] = np.inf
     logger.info(f"Test Reward: {v_reward}, Episode: 0, Batches: {batches}")
+    config['best_tree_size'] = np.inf
     for epoch in range(0, config['max_epochs']+1):
         logger.info(f'** Epoch {epoch}')
         wandb_data = {}
         if stat == 'offline':
             epoch_train_files = rng.choice(train_files, config['hard_update_every']*config['batch_size'], replace=True)
-            
+            train_data = BuildFullTransition(epoch_train_files)
         else:
             tmp_samples_dir = f'{config["out_dir"]}/train/tmp'
             os.makedirs(tmp_samples_dir, exist_ok=True)
-            #TODO:  pre-process in args and json file
             epoch_train_files = collect_online(train_instances, tmp_samples_dir, rng, config["epoch_train_size"],
                     config["njobs"], query_expert_prob=config["node_record_prob"],
                     time_limit=config["time_limit"], agent=agent)
+            epoch_train_files = config['num_repeat']*epoch_train_files
+            train_data = BuildFullTransition(epoch_train_files)
             shutil.rmtree(tmp_samples_dir, ignore_errors=True)
-        train_data = BuildFullTransition(epoch_train_files)
         train_loader = torch_geometric.data.DataLoader(train_data, config['batch_size'], shuffle=True)
         policy_losses, critic1_losses, critic2_losses, value_losses = [],[],[],[]
         for batch_idx, batch in enumerate(train_loader):
@@ -241,9 +242,10 @@ def train(config):
             logger.info(f"10 epochs without improvement, decreasing learning rate")
         elif scheduler.num_bad_epochs == 20:
             logger.info(f"20 epochs without improvement, early stopping")
-            stat = 'online'
-            #TODO: stat from offline to online
-            # break
+            if stat == 'offline':
+                stat = 'online'
+            else:
+                break
         
 
     if config["wandb"]:

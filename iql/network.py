@@ -4,7 +4,6 @@ import torch_geometric
 import numpy as np
 
 from torch.distributions import Categorical
-from utilities import pad_tensor
 
 
 class PreNormException(Exception):
@@ -271,3 +270,13 @@ class Value(GNNPolicy):
         value = super().forward(constraint_features, edge_indices, edge_features, variable_features)
         value = pad_tensor(value[candidates], nb_candidates,value=True)
         return value
+
+def pad_tensor(input_, pad_sizes, value=False, pad_value=-1e8):
+    max_pad_size = pad_sizes.max()
+    output = input_.split(pad_sizes.cpu().numpy().tolist())
+    if value:
+        output = torch.stack([torch.mean(slice_) for slice_ in output], dim=0).unsqueeze(-1)
+    else:
+        output = torch.stack([F.pad(slice_, (0, max_pad_size-slice_.size(0)), 'constant', pad_value)
+                          for slice_ in output], dim=0)
+    return output
