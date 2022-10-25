@@ -15,6 +15,7 @@ import json
 import utilities
 import random
 import glob
+import pprint
 from collections import deque
 from iql.iql_agent import IQL,save
 from utilities import Scheduler,BuildFullTransition,evaluate,wandb_eval_log
@@ -135,11 +136,18 @@ def get_config():
         'mknapsack': 'mknapsack/100_6',
     }
     config['problem_folder'] = problem_folders[config['problem']]
-    return config
+    return config, args
 
+def mkdirs(config, args, logger):
+    logger.info(f'cwd: {os.getcwd()}, model_dir: {config["model_dir"]}')
+    logger.info(f'Pytorch (version {torch.__version__}), path: {torch}')
+    logger.info(f'Command line args: {pprint.pformat(vars(args))}')
+    logger.info(f'Parsed config from {args.config}')
+    os.makedirs(osp.join(config["model_dir"], 'code'))
+    os.makedirs(osp.join(config["model_dir"], 'models'))
+    os.system('cp -r config iql envs *.json *.sh *.py {} {}'.format(args.config, osp.join(config["model_dir"], 'code')))
 
-
-def train(config):
+def train(config, args):
     np.random.seed(config['seed'])
     random.seed(config['seed'])
     torch.manual_seed(config['seed'])
@@ -147,6 +155,7 @@ def train(config):
 
     ### LOG ###
     logger = utilities.configure_logging()
+    mkdirs(config,args,logger)
     if config['wandb']:
         wandb.init(project="rl2branch", name=config['cur_name'], config=config)
 
@@ -187,7 +196,7 @@ def train(config):
                 clip_grad_param=config['clip_grad_param'],
                 seed = config['seed'],
                 device=config['device'])
-    
+    # save(config, agent, wandb, stat)
     agent_pool = AgentPool(agent, config['num_workers'], config['time_limit'], config["mode"])
     agent_pool.start()
     scheduler = Scheduler(agent.actor_optimizer, mode='min', patience=10, factor=0.2, verbose=True)
@@ -289,14 +298,16 @@ def train(config):
         config["cur_epoch"] = epoch
         scheduler.step(np.mean(policy_losses))
         if config['wandb'] and scheduler.num_bad_epochs == 0:
-            torch.save(agent.actor_local.state_dict(), pathlib.Path(config['model_dir'])/'iql_best_actor.pkl')
+            torch.save(agent.actor_local.state_dict(), pathlib.Path(config['model_dir'])/'models/iql_best_actor.pkl')
             logger.info(f"best model so far")
         elif scheduler.num_bad_epochs == 10:
             logger.info(f"10 epochs without improvement, decreasing learning rate")
         elif scheduler.num_bad_epochs == 20:
             logger.info(f"20 epochs without improvement, early stopping")
             if stat == 'offline':
+                logger.info(f'Offline for {epoch} epochs')
                 stat = 'online'
+                logger.info(f'Start online training')
             else:
                 break
         
@@ -308,5 +319,5 @@ def train(config):
     agent_pool.close()
 if __name__ == "__main__":
     torch.multiprocessing.set_start_method('spawn')
-    config = get_config()
-    train(config)
+    config,args = get_config()
+    train(config,args)
