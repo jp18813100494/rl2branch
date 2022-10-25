@@ -196,7 +196,6 @@ def train(config, args):
                 clip_grad_param=config['clip_grad_param'],
                 seed = config['seed'],
                 device=config['device'])
-    # save(config, agent, wandb, stat)
     agent_pool = AgentPool(agent, config['num_workers'], config['time_limit'], config["mode"])
     agent_pool.start()
     scheduler = Scheduler(agent.actor_optimizer, mode='min', patience=10, factor=0.2, verbose=True)
