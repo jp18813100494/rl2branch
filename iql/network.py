@@ -213,8 +213,12 @@ class Actor(GNNPolicy):
     def __init__(self, hidding_size,seed=1):
         super().__init__(emb_size=hidding_size, seed=seed)
     
-    def forward(self,state,eval=False):
-        if eval:
+    def forward(self,state, eval=False):
+        if eval is False:
+            constraint_features, edge_indices, edge_features, variable_features, candidates, nb_candidates = state
+            action_logits = super().forward(constraint_features, edge_indices, edge_features, variable_features)
+            action_logits = pad_tensor(action_logits[candidates], nb_candidates)
+        else:
             constraint_features = state.constraint_features
             edge_indices = state.edge_index
             edge_features = state.edge_attr
@@ -223,10 +227,7 @@ class Actor(GNNPolicy):
             nb_candidates = state.action_set_size
             action_logits = super().forward(constraint_features, edge_indices, edge_features, variable_features)
             action_logits = action_logits[candidates]
-        else:
-            constraint_features, edge_indices, edge_features, variable_features, candidates, nb_candidates = state
-            action_logits = super().forward(constraint_features, edge_indices, edge_features, variable_features)
-            action_logits = pad_tensor(action_logits[candidates], nb_candidates)
+
         return action_logits
 
     def evaluate(self,state,eval=False):

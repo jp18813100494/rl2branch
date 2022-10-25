@@ -20,6 +20,8 @@ from iql.iql_agent import IQL,save
 from utilities import Scheduler,BuildFullTransition,evaluate,wandb_eval_log
 from envs.branch_env import branch_env
 from collect_samples import collect_online
+from agent import AgentPool
+from scipy.stats.mstats import gmean
 
 def get_config():
     parser = argparse.ArgumentParser(description='RL')
@@ -39,12 +41,13 @@ def get_config():
     parser.add_argument("--save_every", type=int, default=10, help="Saves the network every x epochs, default: 25")
     parser.add_argument("--eval_every", type=int, default=3, help="")
     parser.add_argument("--eval_run", type=int, default=5, help="")
-    # parser.add_argument("--num_workers", type=int, default=8, help="")
-    parser.add_argument("--num_valid_seeds", type=int, default=12, help="")
+    parser.add_argument("--num_workers", type=int, default=10, help="")
+    parser.add_argument("--num_valid_seeds", type=int, default=3, help="")
     parser.add_argument("--batch_size", type=int, default=32, help="Batch size, default: 256")
     parser.add_argument("--valid_batch_size", type=int, default=128, help="Valid Batch size, default: 256")
-    parser.add_argument("--num_valid_instances", type=int, default=1000, help="Number of valid instances for branch_env")
-    parser.add_argument("--epoch_train_size", type=int, default=1000, help="Number of train samples in every epoch")
+    parser.add_argument("--num_valid_instances", type=int, default=20, help="Number of valid instances for branch_env")
+    parser.add_argument("--num_train_samples", type=int, default=5000, help="Number of valid instances for branch_env")
+    parser.add_argument("--epoch_train_size", type=int, default=2000, help="Number of train samples in every epoch")
     parser.add_argument("--njobs", type=int, default=4, help='Number of parallel jobs.')
     parser.add_argument("--num_repeat", type=int, default=5, help='Number of repeat for sample data')
     parser.add_argument("--node_record_prob", type=float, default=1.0, help='Probability for recording tree nodes')
@@ -156,6 +159,7 @@ def train(config):
     valid_instances = [f'{valid_path}/instance_{j+1}.lp' for j in range(config['num_valid_instances'])]
     train_instances = [f'{train_path}/instance_{j+1}.lp' for j in range(len(glob.glob(f'{train_path}/instance_*.lp')))]
     logger.info(f"Training on {len(train_files)} training instances and {len(valid_instances)} validation instances")
+    valid_batch = [{'path': instance, 'seed': seed} for instance in valid_instances for seed in range(config['num_valid_seeds'])]
     # collect the pre-computed optimal solutions for the training instances
     with open(f"{config['train_path']}/instance_solutions.json", "r") as f:
         train_sols = json.load(f)
@@ -163,6 +167,7 @@ def train(config):
         valid_sols = json.load(f)
     config["eps"] = -0.1 if config['maximization'] else 0.1
     env = branch_env(valid_instances,valid_sols,config)
+
 
     batches = 0
     stat = config['init_stat']
@@ -182,15 +187,34 @@ def train(config):
                 clip_grad_param=config['clip_grad_param'],
                 seed = config['seed'],
                 device=config['device'])
+    
+    agent_pool = AgentPool(agent, config['num_workers'], config['time_limit'], config["mode"])
+    agent_pool.start()
     scheduler = Scheduler(agent.actor_optimizer, mode='min', patience=10, factor=0.2, verbose=True)
     rng = np.random.RandomState(config['seed'])
     env.seed(config["seed"])
-    v_reward,_ = evaluate(env, agent,config['eval_run'], logger)
-    logger.info(f"Test Reward: {v_reward}, Episode: 0, Batches: {batches}")
+    # v_reward,_ = evaluate(env, agent,config['eval_run'], logger)
+    # Already start jobs
+    if is_validation_epoch(0):
+        _, v_stats_next, v_queue_next, v_access_next = agent_pool.start_job(valid_batch, sample_rate=0.0, greedy=True, block_policy=True)
     config['best_tree_size'] = np.inf
     for epoch in range(0, config['max_epochs']+1):
         logger.info(f'** Epoch {epoch}')
         wandb_data = {}
+        # Allow preempted jobs to access policy
+        if is_validation_epoch(epoch):
+            v_stats, v_queue, v_access = v_stats_next, v_queue_next, v_access_next
+            v_access.set()
+            logger.info(f"  {len(valid_batch)} validation jobs running (preempted)")
+            # do not do anything with the stats yet, we have to wait for the jobs to finish !
+        else:
+            logger.info(f"  validation skipped")
+
+        # Start next epoch's jobs
+        if epoch + 1 <= config["max_epochs"]:
+            if is_validation_epoch(epoch + 1):
+                _, v_stats_next, v_queue_next, v_access_next = agent_pool.start_job(valid_batch, sample_rate=0.0, greedy=True, block_policy=True)
+                
         if stat == 'offline':
             epoch_train_files = rng.choice(train_files, config['hard_update_every']*config['batch_size'], replace=True)
             train_data = BuildFullTransition(epoch_train_files)
@@ -211,14 +235,43 @@ def train(config):
             value_losses.append(value_loss)
             batches += 1
 
+        # if is_validation_epoch(epoch):
+        #     v_reward, v_stats = evaluate(env, agent,config['eval_run'], logger)
+        #     wandb_data = wandb_eval_log(epoch, agent, wandb, wandb_data, v_stats, v_reward, config, logger)
+        #     average10.append(v_reward)
+        # Validation
         if is_validation_epoch(epoch):
-            v_reward, v_stats = evaluate(env, agent,config['eval_run'], logger)
-            wandb_data = wandb_eval_log(epoch, agent, wandb, wandb_data, v_stats, v_reward, config, logger)
-            average10.append(v_reward)
+            v_queue.join()  # wait for all validation episodes to be processed
+            logger.info('  validation jobs finished')
+            v_nnodess = [s['info']['nnodes'] for s in v_stats]
+            v_lpiterss = [s['info']['lpiters'] for s in v_stats]
+            v_times = [s['info']['time'] for s in v_stats]
+
+            wandb_data.update({
+                'valid_nnodes_g': gmean(np.asarray(v_nnodess) + 1) - 1,
+                'valid_nnodes': np.mean(v_nnodess),
+                'valid_nnodes_max': np.amax(v_nnodess),
+                'valid_nnodes_min': np.amin(v_nnodess),
+                'valid_time': np.mean(v_times),
+                'valid_lpiters': np.mean(v_lpiterss),
+            })
+            if epoch == 0:
+                v_nnodes_0 = wandb_data['valid_nnodes'] if wandb_data['valid_nnodes'] != 0 else 1
+                v_nnodes_g_0 = wandb_data['valid_nnodes_g'] if wandb_data['valid_nnodes_g']!= 0 else 1
+            wandb_data.update({
+                'valid_nnodes_norm': wandb_data['valid_nnodes'] / v_nnodes_0,
+                'valid_nnodes_g_norm': wandb_data['valid_nnodes_g'] / v_nnodes_g_0,
+            })
+
+            if config["wandb"] and wandb_data['valid_nnodes_g'] < config["best_tree_size"]:
+                config["best_tree_size"] = wandb_data['valid_nnodes_g']
+                logger.info('Best parameters so far (1-shifted geometric mean), saving model.')
+                # if config["wandb"]:
+                save(config, agent, wandb, stat)
         logger.info(f"Episode: {epoch} | Batches: {batches} | Polciy Loss: {np.mean(policy_losses)}  | Value Loss: {np.mean(value_losses)} | Critic Loss: {np.mean(critic1_losses)} ")
         if is_training_epoch(epoch):
             wandb_data.update({
-                "Valid_reward10": np.mean(average10),
+                # "Valid_reward10": np.mean(average10),
                 "Policy Loss": np.mean(policy_losses),
                 "Value Loss": np.mean(value_losses),
                 "Critic 1 Loss": np.mean(critic1_losses),
@@ -251,7 +304,8 @@ def train(config):
     if config["wandb"]:
         wandb.join()
         wandb.finish()
-
+    v_access_next.set()
+    agent_pool.close()
 if __name__ == "__main__":
     torch.multiprocessing.set_start_method('spawn')
     config = get_config()

@@ -75,8 +75,7 @@ class IQL(nn.Module):
         for batch, (greedy,) in zip(states_loader, greedy_loader):
             with torch.no_grad():
                 batch = batch.to(self.device)
-                
-                logits = self.actor_local(batch, eval)
+                logits = self.actor_local(batch, greedy)
                 # logits = logits[batch.action_set]
 
                 logits_end = batch.action_set_size.cumsum(-1)
