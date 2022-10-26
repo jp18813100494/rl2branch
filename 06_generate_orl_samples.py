@@ -115,13 +115,13 @@ def make_samples(in_queue, out_queue, stop_flag):
             else:
                 action = agent.get_action(state,eval=True)
             try:
-                next_observation, action_set_n, reward, done, _ = env.step(action)
+                next_observation, action_set_n, reward, done, info = env.step(action)
 
                 if scores_are_expert and not stop_flag.is_set():
                     focus_node_obs_n = next_observation["focus_node"]
                     node_observation_n = next_observation["node_observation"]
                     next_state = utilities.extract_state(node_observation_n, action_set_n, focus_node_obs_n.number)
-                    data = [state, action, scores, reward,  done, next_state]
+                    data = [state, action, scores, reward,  done, info, next_state]
                     filename = f'{out_dir}/sample_{episode}_{sample_counter}.pkl'
 
                     with gzip.open(filename, 'wb') as f:

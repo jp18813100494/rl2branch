@@ -38,22 +38,23 @@ def get_config():
     parser.add_argument("--hard_update_every", type=int, default=10, help="")
     parser.add_argument("--clip_grad_param", type=int, default=100, help="")
 
-    parser.add_argument("--max_epochs", type=int, default=100, help="Number of max_epochs, default: 1000")
+    parser.add_argument("--max_epochs", type=int, default=1000, help="Number of max_epochs, default: 1000")
     parser.add_argument("--save_every", type=int, default=10, help="Saves the network every x epochs, default: 25")
     parser.add_argument("--eval_every", type=int, default=3, help="")
     parser.add_argument("--eval_run", type=int, default=5, help="")
-    parser.add_argument("--num_workers", type=int, default=10, help="")
+    parser.add_argument("--num_workers", type=int, default=16, help="")
     parser.add_argument("--num_valid_seeds", type=int, default=5, help="")
     parser.add_argument("--batch_size", type=int, default=32, help="Batch size, default: 256")
     parser.add_argument("--valid_batch_size", type=int, default=128, help="Valid Batch size, default: 256")
     parser.add_argument("--num_valid_instances", type=int, default=20, help="Number of valid instances for branch_env")
-    parser.add_argument("--num_train_samples", type=int, default=5000, help="Number of valid instances for branch_env")
+    parser.add_argument("--num_train_samples", type=int, default=500, help="Number of valid instances for branch_env")
     parser.add_argument("--epoch_train_size", type=int, default=2000, help="Number of train samples in every epoch")
+    parser.add_argument("--num_episodes_per_epoch", type=int, default=30, help="Number of train samples in every epoch")
     parser.add_argument("--njobs", type=int, default=4, help='Number of parallel jobs.')
     parser.add_argument("--num_repeat", type=int, default=5, help='Number of repeat for sample data')
     parser.add_argument("--node_record_prob", type=float, default=1.0, help='Probability for recording tree nodes')
     parser.add_argument("--query_expert_prob", type=float, default=1.0, help='Probability for query the expert')
-    parser.add_argument("--init_stat", type=str, default='offline', choices=['offline', 'online'], help="Init stat for agent")
+    parser.add_argument("--train_stat", type=str, default='offline', choices=['offline', 'online'], help="Init stat for agent")
     
     parser.add_argument('--problem',default='setcover',choices=['setcover', 'cauctions', 'ufacilities', 'indset', 'mknapsack'],help='MILP instance type to process.')
     parser.add_argument("--mode", type=str, default='mdp', choices=['mdp', 'tmdp+ObjLim', 'tmdp+DFS'], help="Mode for branch env")
@@ -145,43 +146,43 @@ def mkdirs(config, args, logger):
     logger.info(f'Parsed config from {args.config}')
     os.makedirs(osp.join(config["model_dir"], 'code'))
     os.makedirs(osp.join(config["model_dir"], 'models'))
-    os.system('cp -r config iql envs *.json *.sh *.py {} {}'.format(args.config, osp.join(config["model_dir"], 'code')))
+    os.system('cp -r config iql envs *.json  *.py {} {}'.format(args.config, osp.join(config["model_dir"], 'code')))
 
 def train(config, args):
     np.random.seed(config['seed'])
     random.seed(config['seed'])
     torch.manual_seed(config['seed'])
     sys.path.insert(0, os.path.abspath(f'./results'))
-
+    rng = np.random.RandomState(config['seed'])
     ### LOG ###
     logger = utilities.configure_logging()
     mkdirs(config,args,logger)
     if config['wandb']:
         wandb.init(project="rl2branch", name=config['cur_name'], config=config)
 
-    is_validation_epoch = lambda epoch: (epoch % config['eval_every'] == 0) or (epoch == config['max_epochs'])
-    is_training_epoch = lambda epoch: (epoch < config['max_epochs'])
     # recover training data & validation instances
     train_files = [str(file) for file in (pathlib.Path(f'data/samples_orl')/config['problem_folder']/'train').glob('sample_*.pkl')]
     valid_path = config['valid_path']
     train_path = config['train_path']
     valid_instances = [f'{valid_path}/instance_{j+1}.lp' for j in range(config['num_valid_instances'])]
     train_instances = [f'{train_path}/instance_{j+1}.lp' for j in range(len(glob.glob(f'{train_path}/instance_*.lp')))]
-    logger.info(f"Training on {len(train_files)} training instances and {len(valid_instances)} validation instances")
     valid_batch = [{'path': instance, 'seed': seed} for instance in valid_instances for seed in range(config['num_valid_seeds'])]
     # collect the pre-computed optimal solutions for the training instances
     with open(f"{config['train_path']}/instance_solutions.json", "r") as f:
         train_sols = json.load(f)
     with open(f"{config['valid_path']}/instance_solutions.json", "r") as f:
         valid_sols = json.load(f)
-    config["eps"] = -0.1 if config['maximization'] else 0.1
+    eps = config["eps"] = -0.1 if config['maximization'] else 0.1
+
+    def train_batch_generator():
+        while True:
+            yield [{'path': instance, 'sol': train_sols[instance] + eps, 'seed': rng.randint(0, 2**32)}
+                    for instance in rng.choice(train_instances, size=config['num_episodes_per_epoch'], replace=True)]
+    train_batches = train_batch_generator()
+    logger.info(f"Training on {len(train_files)} training instances and {len(valid_instances)} validation instances")
+
     env = branch_env(valid_instances,valid_sols,config)
-
-
     batches = 0
-    stat = config['init_stat']
-    average10 = deque(maxlen=10)
-    
     agent = IQL(state_size=env.observation_space.shape[0],
                 action_size=env.action_space.shape[0],
                 config=config,
@@ -200,12 +201,17 @@ def train(config, args):
     agent_pool = AgentPool(agent, config['num_workers'], config['time_limit'], config["mode"])
     agent_pool.start()
     
-    rng = np.random.RandomState(config['seed'])
-    # env.seed(config["seed"])
-    # v_reward,_ = evaluate(env, agent,config['eval_run'], logger)
+    is_validation_epoch = lambda epoch: (epoch % config['eval_every'] == 0) or (epoch == config['max_epochs'])
+    is_offline_training_epoch = lambda epoch: (epoch < config['max_epochs']) and (config['train_stat'] == 'offline')
+    is_online_training_epoch = lambda epoch: (epoch < config['max_epochs']) and (config['train_stat'] == 'online')
+
     # Already start jobs
     if is_validation_epoch(0):
         _, v_stats_next, v_queue_next, v_access_next = agent_pool.start_job(valid_batch, sample_rate=0.0, greedy=True, block_policy=True)
+    if is_online_training_epoch(0):
+        train_batch = next(train_batches)
+        t_samples_next, t_stats_next, t_queue_next, t_access_next = agent_pool.start_job(train_batch, sample_rate=config['sample_rate'], greedy=False, block_policy=True)
+    
     config['best_tree_size'] = np.inf
     for epoch in range(0, config['max_epochs']+1):
         logger.info(f'** Epoch {epoch}')
@@ -217,37 +223,24 @@ def train(config, args):
             logger.info(f"  {len(valid_batch)} validation jobs running (preempted)")
             # do not do anything with the stats yet, we have to wait for the jobs to finish !
         else:
-            logger.info(f"  validation skipped")
+            logger.info(f" validation skipped")
+        if is_online_training_epoch(epoch):
+            t_samples, t_stats, t_queue, t_access = t_samples_next, t_stats_next, t_queue_next, t_access_next
+            t_access.set()
+            logger.info(f"Status: {config['train_stat']}-{len(train_batch)} training jobs running (preempted)")
+        if is_offline_training_epoch(epoch):
+            epoch_train_files = rng.choice(train_files, config['hard_update_every']*config['batch_size'], replace=True)
+            t_samples,t_stats = BuildFullTransition(epoch_train_files)
+            logger.info(f"Status: {config['train_stat']}-{len(t_samples)} training samples was selected")
 
         # Start next epoch's jobs
         if epoch + 1 <= config["max_epochs"]:
-            if is_validation_epoch(epoch + 1):
+            if is_validation_epoch(epoch+1):
                 _, v_stats_next, v_queue_next, v_access_next = agent_pool.start_job(valid_batch, sample_rate=0.0, greedy=True, block_policy=True)
-        #TODO:这部分修改为适配treeMDP的并行采样形式        
-        if stat == 'offline':
-            epoch_train_files = rng.choice(train_files, config['hard_update_every']*config['batch_size'], replace=True)
-            train_data,_ = BuildFullTransition(epoch_train_files)
-        else:
-            tmp_samples_dir = f'{config["out_dir"]}/train/tmp'
-            os.makedirs(tmp_samples_dir, exist_ok=True)
-            epoch_train_files = collect_online(train_instances, train_sols, tmp_samples_dir, rng, agent,config)
-            train_data,_ = BuildFullTransition(epoch_train_files)
-            shutil.rmtree(tmp_samples_dir, ignore_errors=True)
-        train_loader = torch_geometric.data.DataLoader(train_data, config['batch_size'], shuffle=True)
-        policy_losses, critic1_losses, critic2_losses, value_losses = [],[],[],[]
-        for batch_idx, batch in enumerate(train_loader):
-            batch.to(config['device'])
-            policy_loss, critic1_loss, critic2_loss, value_loss = agent.learn(batch)
-            policy_losses.append(policy_loss)
-            critic1_losses.append(critic1_loss)
-            critic2_losses.append(critic2_loss)
-            value_losses.append(value_loss)
-            batches += 1
+            if is_online_training_epoch(epoch+1):
+                train_batch = next(train_batches)
+                t_samples_next, t_stats_next, t_queue_next, t_access_next = agent_pool.start_job(train_batch, sample_rate=config['sample_rate'], greedy=False, block_policy=True)    
 
-        # if is_validation_epoch(epoch):
-        #     v_reward, v_stats = evaluate(env, agent,config['eval_run'], logger)
-        #     wandb_data = wandb_eval_log(epoch, agent, wandb, wandb_data, v_stats, v_reward, config, logger)
-        #     average10.append(v_reward)
         # Validation
         if is_validation_epoch(epoch):
             v_queue.join()  # wait for all validation episodes to be processed
@@ -275,26 +268,38 @@ def train(config, args):
             if config["wandb"] and wandb_data['valid_nnodes_g'] < config["best_tree_size"]:
                 config["best_tree_size"] = wandb_data['valid_nnodes_g']
                 logger.info('Best parameters so far (1-shifted geometric mean), saving model.')
-                save(config, agent, wandb, stat)
+                save(config, agent, wandb, config['train_stat'])
+        # Training
+        if is_online_training_epoch(epoch) or is_offline_training_epoch(epoch):
+            if config['train_stat'] == 'online':
+                t_queue.join()  # wait for all training episodes to be processed
+            logger.info('training jobs finished')
+            logger.info(f" {len(t_samples)} training samples collected")
+            t_losses = agent.update(t_samples)
+            logger.info(' model parameters were updated')
 
-        logger.info(f"Episode: {epoch} | Batches: {batches} | Polciy Loss: {np.mean(policy_losses)}  | Value Loss: {np.mean(value_losses)} | Critic Loss: {np.mean(critic1_losses)} ")
-        if is_training_epoch(epoch):
+            # t_nnodess = [s['info']['nnodes'] for s in t_stats]
+            # t_lpiterss = [s['info']['lpiters'] for s in t_stats]
+            # t_times = [s['info']['time'] for s in t_stats]
+
             wandb_data.update({
-                "actor_lr":get_lr(agent.actor_optimizer),
-                # "Valid_reward10": np.mean(average10),
-                "Policy Loss": np.mean(policy_losses),
-                "Value Loss": np.mean(value_losses),
-                "Critic 1 Loss": np.mean(critic1_losses),
-                "Critic 2 Loss": np.mean(critic2_losses),
-                "Batches": batches,
-                "Episode": epoch
+                # 'train_nnodes_g': gmean(t_nnodess),
+                # 'train_nnodes': np.mean(t_nnodess),
+                # 'train_time': np.mean(t_times),
+                # 'train_lpiters': np.mean(t_lpiterss),
+                'train_nsamples': len(t_samples),
+                'train_actor_loss': t_losses.get('actor_loss', None),
+                'train_critic1_loss': t_losses.get('critic1_loss', None),
+                'train_critic2_loss': t_losses.get('critic2_loss', None),
+                'train_value_loss': t_losses.get('value_loss', None),
             })
+            logger.info(f"Episode: {epoch} | Batches: {batches} | Polciy Loss: {t_losses.get('actor_loss', None)}  | Value Loss: {t_losses.get('critic1_loss', None)} | Critic Loss: {t_losses.get('value_loss', None)} ")
 
         # Send the stats to wandb
         if config['wandb']:
             wandb.log(wandb_data, step = epoch)
         if epoch % config['save_every'] == 0 and config['wandb']:
-            save(config,  model=agent, wandb=wandb, stat='offline', ep=epoch)
+            save(config,  model=agent, wandb=wandb, stat=config['train_stat'], ep=epoch)
         
         config["cur_epoch"] = epoch
         if is_validation_epoch(epoch):
@@ -305,9 +310,9 @@ def train(config, args):
                 logger.info(f"5 epochs without improvement, decreasing learning rate")
             elif agent.actor_scheduler.num_bad_epochs == 10:
                 logger.info(f"10 epochs without improvement, early stopping")
-                if stat == 'offline':
+                if config['train_stat'] == 'offline':
                     logger.info(f'Offline for {epoch} epochs')
-                    stat = 'online'
+                    config['train_stat'] = 'online'
                     logger.info(f'Start online training')
                     agent.reset_optimizer()
                 else:
@@ -317,6 +322,7 @@ def train(config, args):
         wandb.join()
         wandb.finish()
     v_access_next.set()
+    t_access_next.set()
     agent_pool.close()
 if __name__ == "__main__":
     torch.multiprocessing.set_start_method('spawn')

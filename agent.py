@@ -128,7 +128,12 @@ class Agent(threading.Thread):
             ecole.observation.FocusNode(),
             ecole.observation.NodeBipartite()
             )
-        reward_function=ecole.reward.NNodes().cumsum()
+        # reward_function = ecole.reward.NNodes().cumsum()
+        reward_function= {
+            "cum_nnodes": ecole.reward.NNodes().cumsum(),
+            "cur_nnodes": ecole.reward.NNodes()
+        } 
+        
         information_function={
             'nnodes': ecole.reward.NNodes().cumsum(),
             'lpiters': ecole.reward.LpIterations().cumsum(),
@@ -183,30 +188,48 @@ class Agent(threading.Thread):
                 tree_recorder = TreeRecorder()
 
             # Run episode
-            observation, action_set, cum_nnodes, done, info = self.env.reset(instance = instance['path'],
+            observation, action_set, reward, done, info = self.env.reset(instance = instance['path'],
                                                                              primal_bound=instance.get('sol', None),
                                                                              training=training)
             policy_access.wait()
             iter_count = 0
             while not done:
                 focus_node_obs, node_bipartite_obs = observation
+                cum_nnodes, cur_nnodes = reward['cum_nnodes'],reward['cur_nnodes']
                 state = utilities.extract_state(node_bipartite_obs, action_set, focus_node_obs.number)
 
                 # send out policy queries
                 self.policy_queries_queue.put({'state': state, 'greedy': greedy, 'receiver': self.policy_answers_queue})
                 action_idx = self.policy_answers_queue.get()
-
                 action = action_set[action_idx]
 
-                # collect transition samples if requested
-                if sample_rate > 0:
-                    tree_recorder.record_branching_decision(focus_node_obs)
-                    keep_sample = rng.rand() < sample_rate
-                    if keep_sample:
-                        transition = utilities.Transition(state, action_idx, cum_nnodes)
-                        transitions.append(transition)
+                # collect transition samples if requested --part 1
+                # if sample_rate > 0:
+                #     tree_recorder.record_branching_decision(focus_node_obs)
+                #     keep_sample = rng.rand() < sample_rate
+                #     if keep_sample:
+                #         transition = utilities.Transition(state, action_idx, cum_nnodes)
+                #         transitions.append(transition)
+                # observation, action_set, cum_nnodes, done, info = self.env.step(action)
 
-                observation, action_set, cum_nnodes, done, info = self.env.step(action)
+                # collect transition samples if requested --part 2
+                observation_n, action_set_n, reward_n, done, info = self.env.step(action)
+                if done:
+                    break
+                else:
+                    #TODO: 需要考虑下终结状态时候，obs=None,与其他rl问题不一样的地方
+                    focus_node_obs_n, node_bipartite_obs_n = observation_n
+                    cum_nnodes_n, cur_nnodes_n = reward_n['cum_nnodes'],reward_n['cur_nnodes']
+                    next_state= utilities.extract_state(node_bipartite_obs_n, action_set_n, focus_node_obs_n.number)
+                    if sample_rate > 0:
+                        tree_recorder.record_branching_decision(focus_node_obs)
+                        keep_sample = rng.rand() < sample_rate
+                        if keep_sample:
+                            transition = utilities.FullTransition(state, action_idx, None, cur_nnodes_n, done,  next_state, cum_nnodes)
+                            transitions.append(transition)
+
+                observation, action_set, reward = observation_n, action_set_n, reward_n
+
                 iter_count += 1
                 if (iter_count>50000) and training: done=True # avoid too large trees during training for stability
 

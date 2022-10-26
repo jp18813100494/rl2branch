@@ -215,10 +215,12 @@ class Actor(GNNPolicy):
     
     def forward(self,state, eval=False):
         if eval is False:
+            #train stage
             constraint_features, edge_indices, edge_features, variable_features, candidates, nb_candidates = state
             action_logits = super().forward(constraint_features, edge_indices, edge_features, variable_features)
             action_logits = pad_tensor(action_logits[candidates], nb_candidates)
         else:
+            #eval stage
             constraint_features = state.constraint_features
             edge_indices = state.edge_index
             edge_features = state.edge_attr

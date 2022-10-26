@@ -92,11 +92,12 @@ class Transition(torch_geometric.data.Data):
         return Transition(**cuda_values)
 
 class FullTransition(Transition):
-    def __init__(self, state, action,scores,reward,done,next_state,cum_nnodes=None):
+    def __init__(self, state, action, scores,reward,done,next_state,cum_nnodes=None):
         super().__init__(state,action,cum_nnodes)
-        action_idx = scores[self.action_set].argmax()
+        # action_idx = scores[self.action_set].argmax()
+        action_idx = action
         self.action_idx = torch.LongTensor(np.array([action_idx],dtype=np.int32))
-        self.scores = torch.LongTensor(scores)
+        # self.scores = torch.LongTensor(scores)
         self.reward = torch.FloatTensor(np.expand_dims(-reward, axis=-1))
         self.done = torch.FloatTensor(np.expand_dims(int(done), axis=-1))
 
@@ -133,14 +134,17 @@ class FullTransition(Transition):
 
 def BuildFullTransition(data_files):
     transitions = []
+    stats = []
     for sample_file in data_files:
         with gzip.open(sample_file, 'rb') as f:
             sample = pickle.load(f)
-        state, action, scores, reward, done, next_state = sample['data']
+        state, action, scores, reward, done, info, next_state = sample['data']
         fulltransition = FullTransition(state,action,scores,reward,done,next_state)
         transitions.append(fulltransition)
+        if done:
+            stats.append({"info":info})
     random.shuffle(transitions)
-    return transitions
+    return transitions, stats
 
 def extract_state(observation, action_set, node_id):
     constraint_features = torch.FloatTensor(observation.row_features)

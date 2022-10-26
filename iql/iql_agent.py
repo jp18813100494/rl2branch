@@ -81,7 +81,6 @@ class IQL(nn.Module):
         self.value_optimizer = optim.Adam(self.value_net.parameters(), lr=self.critic_lr)
 
     def sample_action_idx(self, states, greedy):
-        #TODO； revise for efficient evaluation
         if isinstance(greedy, bool):
             greedy = torch.tensor(np.repeat(greedy, len(states), dtype=torch.long))
         elif not isinstance(greedy, torch.Tensor):
@@ -89,13 +88,11 @@ class IQL(nn.Module):
 
         states_loader = torch_geometric.data.DataLoader(states, batch_size=self.config['batch_size'])
         greedy_loader = torch.utils.data.DataLoader(torch.utils.data.TensorDataset(greedy), batch_size=self.config['batch_size'])
-        eval = greedy
         action_idxs = []
         for batch, (greedy,) in zip(states_loader, greedy_loader):
             with torch.no_grad():
                 batch = batch.to(self.device)
                 logits = self.actor_local(batch, greedy)
-                # logits = logits[batch.action_set]
 
                 logits_end = batch.action_set_size.cumsum(-1)
                 logits_start = logits_end - batch.action_set_size
@@ -151,6 +148,70 @@ class IQL(nn.Module):
         critic1_loss = ((q1 - q_target)**2).mean() 
         critic2_loss = ((q2 - q_target)**2).mean()
         return critic1_loss, critic2_loss
+
+    def update(self, transitions):
+        n_samples = len(transitions)
+        if n_samples < 1:
+           stats = {'loss': 0.0, 'actor_loss': 0.0, 'critic1_loss': 0.0, 'critic2_loss': 0.0, 'value_loss': 0.0 }
+           return stats
+
+        transitions = torch_geometric.data.DataLoader(transitions, batch_size=self.config["batch_size"], shuffle=True)
+        stats = {}
+
+        self.value_optimizer.zero_grad()
+        for batch in transitions:
+            batch = batch.to(self.device)
+            states = (batch.constraint_features, batch.edge_index, batch.edge_attr, 
+            batch.variable_features,batch.action_set,batch.action_set_size)
+            actions = batch.action_idx.unsqueeze(1)
+            value_loss = self.calc_value_loss(states, actions)
+            value_loss /= n_samples
+            value_loss.backward()
+            # Update stats
+            stats['value_loss'] = stats.get('value_loss', 0.0) + value_loss.item()
+        self.value_optimizer.step()
+
+        self.actor_optimizer.zero_grad()
+        for batch in transitions:
+            batch = batch.to(self.device)
+            states = (batch.constraint_features, batch.edge_index, batch.edge_attr, 
+            batch.variable_features,batch.action_set,batch.action_set_size)
+            actions = batch.action_idx.unsqueeze(1)
+            actor_loss = self.calc_policy_loss(states, actions)
+            actor_loss /= n_samples
+            actor_loss.backward()
+            # Update stats
+            stats['actor_loss'] = stats.get('actor_loss', 0.0) + actor_loss.item()
+        self.actor_optimizer.step()
+
+        self.critic1_optimizer.zero_grad()
+        self.critic2_optimizer.zero_grad()
+
+        for batch in transitions:
+            batch = batch.to(self.device)
+            loss = torch.tensor([0.0], device=self.device)
+            states = (batch.constraint_features, batch.edge_index, batch.edge_attr, 
+                    batch.variable_features,batch.action_set,batch.action_set_size)
+            actions = batch.action_idx.unsqueeze(1)
+            rewards = batch.reward
+            next_states = (batch.constraint_features_n, batch.edge_index_n, batch.edge_attr_n, 
+                            batch.variable_features_n,batch.action_set_n,batch.action_set_n_size)
+            dones = batch.done
+            critic1_loss, critic2_loss = self.calc_q_loss(states, actions, rewards, dones, next_states)
+            critic1_loss /= n_samples
+            critic1_loss.backward()
+            clip_grad_norm_(self.critic1.parameters(), self.clip_grad_param)
+
+            critic2_loss /= n_samples
+            critic2_loss.backward()
+            clip_grad_norm_(self.critic2.parameters(), self.clip_grad_param)
+            # Update stats
+            stats['critic1_loss'] = stats.get('critic1_loss', 0.0) + critic1_loss.item()
+            stats['critic2_loss'] = stats.get('critic2_loss', 0.0) + critic2_loss.item()
+
+        self.critic1_optimizer.step()
+        self.critic2_optimizer.step()
+        return stats
 
 
     def learn(self, batch):
