@@ -95,7 +95,7 @@ class FullTransition(Transition):
     def __init__(self, state, action, scores,reward,done,next_state,cum_nnodes=None):
         super().__init__(state,action,cum_nnodes)
         # action_idx = scores[self.action_set].argmax()
-        action_idx = action
+        action_idx = (self.action_set==action).nonzero().item()
         self.action_idx = torch.LongTensor(np.array([action_idx],dtype=np.int32))
         # self.scores = torch.LongTensor(scores)
         self.reward = torch.FloatTensor(np.expand_dims(-reward, axis=-1))

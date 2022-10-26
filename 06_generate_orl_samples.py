@@ -113,7 +113,7 @@ def make_samples(in_queue, out_queue, stop_flag):
             if agent is None:
                 action = action_set[scores[action_set].argmax()]
             else:
-                action = agent.get_action(state,eval=True)
+                action = action_set[agent.get_action(state,eval=True)]
             try:
                 next_observation, action_set_n, reward, done, info = env.step(action)
 
