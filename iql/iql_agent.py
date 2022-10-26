@@ -1,3 +1,4 @@
+from re import M
 import torch
 import torch_geometric
 import torch.optim as optim
@@ -60,7 +61,25 @@ class IQL(nn.Module):
         self.value_optimizer = optim.Adam(self.value_net.parameters(), lr=critic_lr)
         self.step = 0
 
-    
+        self.actor_scheduler = Scheduler(self.actor_optimizer, mode='min', patience=5, factor=0.2, verbose=True)
+        self.critic1_scheduler = Scheduler(self.critic1_optimizer, mode='min', patience=5, factor=0.2, verbose=True)
+        self.critic2_scheduler = Scheduler(self.critic2_optimizer, mode='min', patience=5, factor=0.2, verbose=True)
+        self.value_scheduler = Scheduler(self.value_optimizer, mode='min', patience=5, factor=0.2, verbose=True)
+        
+
+    def scheduler_step(self,metric):
+        self.actor_scheduler.step(metric)
+        self.critic1_scheduler.step(metric)
+        self.critic2_scheduler.step(metric)
+        self.value_scheduler.step(metric)
+        
+
+    def reset_optimizer(self):
+        self.actor_optimizer = optim.Adam(self.actor_local.parameters(), lr=self.actor_lr) 
+        self.critic1_optimizer = optim.Adam(self.critic1.parameters(), lr=self.critic_lr)
+        self.critic2_optimizer = optim.Adam(self.critic2.parameters(), lr=self.critic_lr)
+        self.value_optimizer = optim.Adam(self.value_net.parameters(), lr=self.critic_lr)
+
     def sample_action_idx(self, states, greedy):
         #TODO； revise for efficient evaluation
         if isinstance(greedy, bool):
@@ -218,3 +237,27 @@ def save(config, model, wandb, stat="offline",ep=None):
         # wandb.save(models_dir +'/critic1_'+ "best.pth")
         torch.save(model.value_net.state_dict(), models_dir +'/value_' +stat+ "best.pth")
         # wandb.save(models_dir +'/value_'+ "best.pth")
+
+def get_lr(optimizer):
+    for param_group in optimizer.param_groups:
+        return param_group['lr']
+
+class Scheduler(torch.optim.lr_scheduler.ReduceLROnPlateau):
+    def __init__(self, optimizer, **kwargs):
+        super().__init__(optimizer, **kwargs)
+
+    def step(self, metrics):
+        # convert `metrics` to float, in case it's a zero-dim Tensor
+        current = float(metrics)
+        self.last_epoch =+1
+
+        if self.is_better(current, self.best):
+            self.best = current
+            self.num_bad_epochs = 0
+        else:
+            self.num_bad_epochs += 1
+
+        if self.num_bad_epochs == self.patience:
+            self._reduce_lr(self.last_epoch)
+
+        self._last_lr = [group['lr'] for group in self.optimizer.param_groups]

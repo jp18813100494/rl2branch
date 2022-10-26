@@ -17,7 +17,7 @@ import random
 import glob
 import pprint
 from collections import deque
-from iql.iql_agent import IQL,save
+from iql.iql_agent import IQL,save,get_lr
 from utilities import Scheduler,BuildFullTransition,evaluate,wandb_eval_log
 from envs.branch_env import branch_env
 from collect_samples import collect_online
@@ -43,7 +43,7 @@ def get_config():
     parser.add_argument("--eval_every", type=int, default=3, help="")
     parser.add_argument("--eval_run", type=int, default=5, help="")
     parser.add_argument("--num_workers", type=int, default=10, help="")
-    parser.add_argument("--num_valid_seeds", type=int, default=3, help="")
+    parser.add_argument("--num_valid_seeds", type=int, default=5, help="")
     parser.add_argument("--batch_size", type=int, default=32, help="Batch size, default: 256")
     parser.add_argument("--valid_batch_size", type=int, default=128, help="Valid Batch size, default: 256")
     parser.add_argument("--num_valid_instances", type=int, default=20, help="Number of valid instances for branch_env")
@@ -107,13 +107,13 @@ def get_config():
         valid_path = "data/instances/ufacilities/valid_35_35_5"
         train_path = "data/instances/ufacilities/train_35_35_5"
         out_dir = 'data/samples_orl/ufacilities/35_35_5'
-        time_limit = 600
+        time_limit = None
     elif config['problem'] == "mknapsack":
         maximization = True
         valid_path = "data/instances/mknapsack/valid_100_6"
         train_path = "data/instances/mknapsack/train_100_6"
         out_dir = 'data/samples_orl/mknapsack/100_6'
-        time_limit = 60
+        time_limit = None
     else:
         raise NotImplementedError
     config['train_path'] = train_path
@@ -196,11 +196,12 @@ def train(config, args):
                 clip_grad_param=config['clip_grad_param'],
                 seed = config['seed'],
                 device=config['device'])
+    logger.info(f'Epoch:0, Actor_lr:{get_lr(agent.actor_optimizer)},Critic_lr:{get_lr(agent.value_optimizer)}')
     agent_pool = AgentPool(agent, config['num_workers'], config['time_limit'], config["mode"])
     agent_pool.start()
-    scheduler = Scheduler(agent.actor_optimizer, mode='min', patience=10, factor=0.2, verbose=True)
+    
     rng = np.random.RandomState(config['seed'])
-    env.seed(config["seed"])
+    # env.seed(config["seed"])
     # v_reward,_ = evaluate(env, agent,config['eval_run'], logger)
     # Already start jobs
     if is_validation_epoch(0):
@@ -274,11 +275,12 @@ def train(config, args):
             if config["wandb"] and wandb_data['valid_nnodes_g'] < config["best_tree_size"]:
                 config["best_tree_size"] = wandb_data['valid_nnodes_g']
                 logger.info('Best parameters so far (1-shifted geometric mean), saving model.')
-                # if config["wandb"]:
                 save(config, agent, wandb, stat)
+
         logger.info(f"Episode: {epoch} | Batches: {batches} | Polciy Loss: {np.mean(policy_losses)}  | Value Loss: {np.mean(value_losses)} | Critic Loss: {np.mean(critic1_losses)} ")
         if is_training_epoch(epoch):
             wandb_data.update({
+                "actor_lr":get_lr(agent.actor_optimizer),
                 # "Valid_reward10": np.mean(average10),
                 "Policy Loss": np.mean(policy_losses),
                 "Value Loss": np.mean(value_losses),
@@ -295,21 +297,21 @@ def train(config, args):
             save(config,  model=agent, wandb=wandb, stat='offline', ep=epoch)
         
         config["cur_epoch"] = epoch
-        scheduler.step(np.mean(policy_losses))
-        if config['wandb'] and scheduler.num_bad_epochs == 0:
-            torch.save(agent.actor_local.state_dict(), pathlib.Path(config['model_dir'])/'models/iql_best_actor.pkl')
-            logger.info(f"best model so far")
-        elif scheduler.num_bad_epochs == 10:
-            logger.info(f"10 epochs without improvement, decreasing learning rate")
-        elif scheduler.num_bad_epochs == 20:
-            logger.info(f"20 epochs without improvement, early stopping")
-            if stat == 'offline':
-                logger.info(f'Offline for {epoch} epochs')
-                stat = 'online'
-                logger.info(f'Start online training')
-            else:
-                break
-        
+        if is_validation_epoch(epoch):
+            agent.scheduler_step(wandb_data['valid_nnodes_g'])
+            if config['wandb'] and agent.actor_scheduler.num_bad_epochs == 0:
+                logger.info(f"best model so far")
+            elif agent.actor_scheduler.num_bad_epochs == 5:
+                logger.info(f"5 epochs without improvement, decreasing learning rate")
+            elif agent.actor_scheduler.num_bad_epochs == 10:
+                logger.info(f"10 epochs without improvement, early stopping")
+                if stat == 'offline':
+                    logger.info(f'Offline for {epoch} epochs')
+                    stat = 'online'
+                    logger.info(f'Start online training')
+                    agent.reset_optimizer()
+                else:
+                    break
 
     if config["wandb"]:
         wandb.join()
