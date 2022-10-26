@@ -138,11 +138,14 @@ def BuildFullTransition(data_files):
     for sample_file in data_files:
         with gzip.open(sample_file, 'rb') as f:
             sample = pickle.load(f)
-        state, action, scores, reward, done, info, next_state = sample['data']
+        if len(sample['data'])==6:
+            state, action, scores, reward, done, next_state = sample['data']
+        elif len(sample['data'])==7:
+            state, action, scores, reward, done, info, next_state = sample['data']
         fulltransition = FullTransition(state,action,scores,reward,done,next_state)
         transitions.append(fulltransition)
-        if done:
-            stats.append({"info":info})
+        # if done:
+        #     stats.append({"info":info})
     random.shuffle(transitions)
     return transitions, stats
 

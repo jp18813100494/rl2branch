@@ -22,11 +22,12 @@
     "num_valid_instances": 1000,
     "num_train_samples": 10000,
     "epoch_train_size":10000,
+    "num_episodes_per_epoch":20,
     "njobs": 12,
     "num_repeat":3,
     "node_record_prob": 1.0,
     "query_expert_prob": 1.0,
-    "init_stat": "offline",
+    "train_stat": "offline",
 
     "problem": "setcover",
     "mode": "mdp",
