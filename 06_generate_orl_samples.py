@@ -111,9 +111,11 @@ def make_samples(in_queue, out_queue, stop_flag):
             node_observation = observation["node_observation"]
             state = utilities.extract_state(node_observation, action_set, focus_node_obs.number)
             if agent is None:
-                action = action_set[scores[action_set].argmax()]
+                action_idx = scores[action_set].argmax()
+                action = action_set[action_idx]
             else:
-                action = action_set[agent.get_action(state,eval=True)]
+                action_idx = agent.get_action(state,eval=True)
+                action = action_set[action_idx]
             try:
                 next_observation, action_set_n, reward, done, info = env.step(action)
 
@@ -121,7 +123,7 @@ def make_samples(in_queue, out_queue, stop_flag):
                     focus_node_obs_n = next_observation["focus_node"]
                     node_observation_n = next_observation["node_observation"]
                     next_state = utilities.extract_state(node_observation_n, action_set_n, focus_node_obs_n.number)
-                    data = [state, action, scores, reward,  done, info, next_state]
+                    data = [state, action, action_idx, scores, reward,  done, info, next_state]
                     filename = f'{out_dir}/sample_{episode}_{sample_counter}.pkl'
 
                     with gzip.open(filename, 'wb') as f:

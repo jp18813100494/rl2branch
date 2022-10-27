@@ -217,7 +217,6 @@ class Agent(threading.Thread):
                 if done:
                     break
                 else:
-                    #TODO: 需要考虑下终结状态时候，obs=None,与其他rl问题不一样的地方
                     focus_node_obs_n, node_bipartite_obs_n = observation_n
                     cum_nnodes_n, cur_nnodes_n = reward_n['cum_nnodes'],reward_n['cur_nnodes']
                     next_state= utilities.extract_state(node_bipartite_obs_n, action_set_n, focus_node_obs_n.number)
@@ -225,7 +224,8 @@ class Agent(threading.Thread):
                         tree_recorder.record_branching_decision(focus_node_obs)
                         keep_sample = rng.rand() < sample_rate
                         if keep_sample:
-                            transition = utilities.FullTransition(state, action_idx, None, cur_nnodes_n, done,  next_state, cum_nnodes)
+                            #TODO:存在多个index情况，需要调整
+                            transition = utilities.FullTransition(state, action, action_idx, None, cur_nnodes_n, done,  next_state, cum_nnodes)
                             transitions.append(transition)
 
                 observation, action_set, reward = observation_n, action_set_n, reward_n

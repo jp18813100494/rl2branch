@@ -92,12 +92,12 @@ class Transition(torch_geometric.data.Data):
         return Transition(**cuda_values)
 
 class FullTransition(Transition):
-    def __init__(self, state, action, scores,reward,done,next_state,cum_nnodes=None):
+    def __init__(self, state, action, action_idx, scores,reward,done,next_state,cum_nnodes=None):
         super().__init__(state,action,cum_nnodes)
         # action_idx = scores[self.action_set].argmax()
-        action_idx = (self.action_set==action).nonzero().item()
+        # action_idx = (self.action_set==action).nonzero().item()
         self.action_idx = torch.LongTensor(np.array([action_idx],dtype=np.int32))
-        # self.scores = torch.LongTensor(scores)
+        self.scores = torch.LongTensor(scores)
         self.reward = torch.FloatTensor(np.expand_dims(-reward, axis=-1))
         self.done = torch.FloatTensor(np.expand_dims(int(done), axis=-1))
 
@@ -138,14 +138,12 @@ def BuildFullTransition(data_files):
     for sample_file in data_files:
         with gzip.open(sample_file, 'rb') as f:
             sample = pickle.load(f)
-        if len(sample['data'])==6:
-            state, action, scores, reward, done, next_state = sample['data']
-        elif len(sample['data'])==7:
-            state, action, scores, reward, done, info, next_state = sample['data']
-        fulltransition = FullTransition(state,action,scores,reward,done,next_state)
+        if len(sample['data'])==7:
+            state, action, action_idx, scores, reward, done, next_state = sample['data']
+        elif len(sample['data'])==8:
+            state, action, action_idx, scores, reward, done, info, next_state = sample['data']
+        fulltransition = FullTransition(state, action, action_idx, scores, reward, done, next_state)
         transitions.append(fulltransition)
-        # if done:
-        #     stats.append({"info":info})
     random.shuffle(transitions)
     return transitions, stats
 
