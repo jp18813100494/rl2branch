@@ -289,15 +289,7 @@ def train(config, args):
 
             logger.info(' model parameters were updated')
 
-            # t_nnodess = [s['info']['nnodes'] for s in t_stats]
-            # t_lpiterss = [s['info']['lpiters'] for s in t_stats]
-            # t_times = [s['info']['time'] for s in t_stats]
-
             wandb_data.update({
-                # 'train_nnodes_g': gmean(t_nnodess),
-                # 'train_nnodes': np.mean(t_nnodess),
-                # 'train_time': np.mean(t_times),
-                # 'train_lpiters': np.mean(t_lpiterss),
                 'train_nsamples': len(t_samples),
                 'train_actor_loss': t_losses.get('actor_loss', None),
                 'train_critic1_loss': t_losses.get('critic1_loss', None),
@@ -326,6 +318,8 @@ def train(config, args):
                     config['train_stat'] = 'online'
                     logger.info(f'Start online training')
                     agent.reset_optimizer()
+                    train_batch = next(train_batches)
+                    t_samples_next, t_stats_next, t_queue_next, t_access_next = agent_pool.start_job(train_batch, sample_rate=config['sample_rate'], greedy=False, block_policy=True)
                 else:
                     break
 
