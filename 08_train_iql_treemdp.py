@@ -276,6 +276,17 @@ def train(config, args):
             logger.info('training jobs finished')
             logger.info(f" {len(t_samples)} training samples collected")
             t_losses = agent.update(t_samples)
+            # train_loader = torch_geometric.data.DataLoader(t_samples, config['batch_size'], shuffle=True)
+            # policy_losses, critic1_losses, critic2_losses, value_losses = [],[],[],[]
+            # for batch_idx, batch in enumerate(train_loader):
+            #     batch.to(config['device'])
+            #     policy_loss, critic1_loss, critic2_loss, value_loss = agent.learn(batch)
+            #     policy_losses.append(policy_loss)
+            #     critic1_losses.append(critic1_loss)
+            #     critic2_losses.append(critic2_loss)
+            #     value_losses.append(value_loss)
+
+
             logger.info(' model parameters were updated')
 
             # t_nnodess = [s['info']['nnodes'] for s in t_stats]

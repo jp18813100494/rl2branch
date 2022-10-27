@@ -53,7 +53,7 @@ def get_config():
     parser.add_argument("--num_repeat", type=int, default=5, help='Number of repeat for sample data')
     parser.add_argument("--node_record_prob", type=float, default=1.0, help='Probability for recording tree nodes')
     parser.add_argument("--query_expert_prob", type=float, default=1.0, help='Probability for query the expert')
-    parser.add_argument("--init_stat", type=str, default='offline', choices=['offline', 'online'], help="Init stat for agent")
+    parser.add_argument("--train_stat", type=str, default='offline', choices=['offline', 'online'], help="Init stat for agent")
     
     parser.add_argument('--problem',default='setcover',choices=['setcover', 'cauctions', 'ufacilities', 'indset', 'mknapsack'],help='MILP instance type to process.')
     parser.add_argument("--mode", type=str, default='mdp', choices=['mdp', 'tmdp+ObjLim', 'tmdp+DFS'], help="Mode for branch env")
@@ -179,7 +179,7 @@ def train(config, args):
 
 
     batches = 0
-    stat = config['init_stat']
+    stat = config['train_stat']
     average10 = deque(maxlen=10)
     
     agent = IQL(state_size=env.observation_space.shape[0],
