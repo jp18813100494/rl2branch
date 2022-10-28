@@ -125,8 +125,9 @@ class IQL(nn.Module):
         _, dist = self.actor_local.evaluate(states)
         log_probs = dist.log_prob(actions.squeeze(-1))
         actor_loss = -(exp_a * log_probs).mean()
+        entropy = dist.entropy().sum()
 
-        return actor_loss
+        return actor_loss,entropy
     
     def calc_value_loss(self, states, actions):
         with torch.no_grad():
@@ -174,14 +175,21 @@ class IQL(nn.Module):
         self.actor_optimizer.zero_grad()
         for batch in transitions:
             batch = batch.to(self.device)
+            loss = torch.tensor([0.0], device=self.device)
             states = (batch.constraint_features, batch.edge_index, batch.edge_attr, 
             batch.variable_features,batch.action_set,batch.action_set_size)
             actions = batch.action_idx.unsqueeze(1)
-            actor_loss = self.calc_policy_loss(states, actions)
+            actor_loss ,entropy = self.calc_policy_loss(states, actions)
             actor_loss /= n_samples
-            actor_loss.backward()
+            loss += actor_loss
+            entropy /= n_samples
+            loss += - self.config['entropy_bonus']*entropy
+
+            loss.backward()
             # Update stats
             stats['actor_loss'] = stats.get('actor_loss', 0.0) + actor_loss.item()
+            stats['loss'] = stats.get('loss', 0.0) + loss.item()
+            stats['entropy'] = stats.get('entropy', 0.0) + entropy.item()
         self.actor_optimizer.step()
 
         self.critic1_optimizer.zero_grad()
@@ -233,7 +241,7 @@ class IQL(nn.Module):
         value_loss.backward()
         self.value_optimizer.step()
 
-        actor_loss = self.calc_policy_loss(states, actions)
+        actor_loss,_ = self.calc_policy_loss(states, actions)
         self.actor_optimizer.zero_grad()
         actor_loss.backward()
         self.actor_optimizer.step()

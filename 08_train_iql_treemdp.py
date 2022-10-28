@@ -34,13 +34,14 @@ def get_config():
     parser.add_argument("--temperature", type=float, default=3, help="")
     parser.add_argument("--expectile", type=float, default=0.7, help="")
     parser.add_argument("--tau", type=float, default=5e-3, help="")
+    parser.add_argument("--entropy_bonus", type=float, default=1e-5, help="")
     parser.add_argument("--gamma", type=float, default=0.99, help="")
     parser.add_argument("--hard_update_every", type=int, default=10, help="")
     parser.add_argument("--clip_grad_param", type=int, default=100, help="")
 
     parser.add_argument("--max_epochs", type=int, default=1000, help="Number of max_epochs, default: 1000")
     parser.add_argument("--save_every", type=int, default=10, help="Saves the network every x epochs, default: 25")
-    parser.add_argument("--eval_every", type=int, default=3, help="")
+    parser.add_argument("--eval_every", type=int, default=10, help="")
     parser.add_argument("--eval_run", type=int, default=5, help="")
     parser.add_argument("--num_workers", type=int, default=16, help="")
     parser.add_argument("--num_valid_seeds", type=int, default=5, help="")
@@ -49,7 +50,7 @@ def get_config():
     parser.add_argument("--num_valid_instances", type=int, default=20, help="Number of valid instances for branch_env")
     parser.add_argument("--num_train_samples", type=int, default=5000, help="Number of valid instances for branch_env")
     parser.add_argument("--epoch_train_size", type=int, default=2000, help="Number of train samples in every epoch")
-    parser.add_argument("--num_episodes_per_epoch", type=int, default=40, help="Number of train samples in every epoch")
+    parser.add_argument("--num_episodes_per_epoch", type=int, default=10, help="Number of train samples in every epoch")
     parser.add_argument("--njobs", type=int, default=4, help='Number of parallel jobs.')
     parser.add_argument("--num_repeat", type=int, default=5, help='Number of repeat for sample data')
     parser.add_argument("--node_record_prob", type=float, default=1.0, help='Probability for recording tree nodes')
@@ -276,25 +277,17 @@ def train(config, args):
             logger.info('training jobs finished')
             logger.info(f" {len(t_samples)} training samples collected")
             t_losses = agent.update(t_samples)
-            # train_loader = torch_geometric.data.DataLoader(t_samples, config['batch_size'], shuffle=True)
-            # policy_losses, critic1_losses, critic2_losses, value_losses = [],[],[],[]
-            # for batch_idx, batch in enumerate(train_loader):
-            #     batch.to(config['device'])
-            #     policy_loss, critic1_loss, critic2_loss, value_loss = agent.learn(batch)
-            #     policy_losses.append(policy_loss)
-            #     critic1_losses.append(critic1_loss)
-            #     critic2_losses.append(critic2_loss)
-            #     value_losses.append(value_loss)
-
-
             logger.info(' model parameters were updated')
 
             wandb_data.update({
                 'train_nsamples': len(t_samples),
                 'train_actor_loss': t_losses.get('actor_loss', None),
+                'train_loss': t_losses.get('loss', None),
+                'train_entropy': t_losses.get('entropy', None),
                 'train_critic1_loss': t_losses.get('critic1_loss', None),
                 'train_critic2_loss': t_losses.get('critic2_loss', None),
                 'train_value_loss': t_losses.get('value_loss', None),
+                'actor_lr':get_lr(agent.actor_optimizer),
             })
             logger.info(f"Episode: {epoch} | Batches: {batches} | Polciy Loss: {t_losses.get('actor_loss', None)}  | Value Loss: {t_losses.get('critic1_loss', None)} | Critic Loss: {t_losses.get('value_loss', None)} ")
 
