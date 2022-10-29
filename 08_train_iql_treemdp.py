@@ -48,7 +48,7 @@ def get_config():
     parser.add_argument("--batch_size", type=int, default=32, help="Batch size, default: 256")
     parser.add_argument("--valid_batch_size", type=int, default=128, help="Valid Batch size, default: 256")
     parser.add_argument("--num_valid_instances", type=int, default=20, help="Number of valid instances for branch_env")
-    parser.add_argument("--num_train_samples", type=int, default=5000, help="Number of valid instances for branch_env")
+    parser.add_argument("--num_train_samples", type=int, default=500, help="Number of valid instances for branch_env")
     parser.add_argument("--epoch_train_size", type=int, default=2000, help="Number of train samples in every epoch")
     parser.add_argument("--num_episodes_per_epoch", type=int, default=10, help="Number of train samples in every epoch")
     parser.add_argument("--njobs", type=int, default=4, help='Number of parallel jobs.')
@@ -150,8 +150,6 @@ def mkdirs(config, args, logger):
     os.system('cp -r config iql envs *.json  *.py {} {}'.format(args.config, osp.join(config["model_dir"], 'code')))
 
 def train(config, args):
-    np.random.seed(config['seed'])
-    random.seed(config['seed'])
     torch.manual_seed(config['seed'])
     sys.path.insert(0, os.path.abspath(f'./results'))
     rng = np.random.RandomState(config['seed'])

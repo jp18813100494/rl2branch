@@ -211,7 +211,7 @@ class Actor(GNNPolicy):
     Actor function for discrete actions
     """
     def __init__(self, hidding_size,seed=1):
-        super().__init__(emb_size=hidding_size, seed=seed)
+        super().__init__(emb_size=hidding_size)
     
     def forward(self,state, eval=False):
         if eval is False:
@@ -253,7 +253,7 @@ class Critic(GNNPolicy):
     Critic function for discrete actions
     """
     def __init__(self, hidding_size,seed=1):
-        super().__init__(emb_size=hidding_size, seed=seed)
+        super().__init__(emb_size=hidding_size)
     
     def forward(self, state):
         constraint_features, edge_indices, edge_features, variable_features,candidates,nb_candidates = state
@@ -266,7 +266,7 @@ class Value(GNNPolicy):
     Critic function for discrete actions
     """
     def __init__(self, hidding_size,seed=1):
-        super().__init__(emb_size=hidding_size, seed=seed)
+        super().__init__(emb_size=hidding_size)
     
     def forward(self, state):
         constraint_features, edge_indices, edge_features, variable_features,candidates,nb_candidates = state
