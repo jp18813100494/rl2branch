@@ -16,6 +16,7 @@ import numpy as np
 import ecole
 import utilities
 from collections import namedtuple
+from agent import TreeRecorder
 
 
 class ExploreThenStrongBranch:
@@ -37,7 +38,7 @@ class ExploreThenStrongBranch:
             return (self.pseudocosts_function.extract(model,done), False)
 
 
-def send_orders(orders_queue, instances, seed, query_expert_prob, time_limit, out_dir, stop_flag, agent=None):
+def send_orders(orders_queue, instances, seed, query_expert_prob, time_limit, out_dir, stop_flag,mode='mdp',agent=None, sample_rate=1.0):
     """
     Continuously send sampling orders to workers (relies on limited
     queue capacity).
@@ -65,7 +66,7 @@ def send_orders(orders_queue, instances, seed, query_expert_prob, time_limit, ou
     while not stop_flag.is_set():
         instance = rng.choice(instances)
         seed = rng.randint(2**32)
-        orders_queue.put([episode, instance, seed, query_expert_prob, time_limit, out_dir, agent])
+        orders_queue.put([episode, instance, seed, query_expert_prob, time_limit, out_dir, agent,sample_rate, mode])
         episode += 1
 
 
@@ -83,17 +84,19 @@ def make_samples(in_queue, out_queue, stop_flag):
     """
     sample_counter = 0
     while not stop_flag.is_set():
-        episode, instance, seed, query_expert_prob, time_limit, out_dir, agent = in_queue.get()
-
+        episode, instance, seed, query_expert_prob, time_limit, out_dir, agent, sample_rate, mode= in_queue.get()
         scip_parameters = {'separating/maxrounds': 0, 'presolving/maxrestarts': 0,
                            'limits/time': time_limit, 'timing/clocktype': 2}
         observation_function = { "scores": ExploreThenStrongBranch(expert_probability=query_expert_prob),
                                 "focus_node":ecole.observation.FocusNode(),
-                                 "node_observation": ecole.observation.NodeBipartite() }
-        reward_function= ecole.reward.NNodes()
+                                "node_observation": ecole.observation.NodeBipartite() }
+        # reward_function= ecole.reward.NNodes()
+        reward_function= {
+            "cum_nnodes": ecole.reward.NNodes().cumsum(),
+            "cur_nnodes": ecole.reward.NNodes()
+        }
         env = ecole.environment.Branching(observation_function=observation_function,reward_function=reward_function,
                                           scip_params=scip_parameters, pseudo_candidates=True)
-
         print(f"[w {threading.current_thread().name}] episode {episode}, seed {seed}, "
               f"processing instance '{instance}'...\n", end='')
         out_queue.put({
@@ -102,13 +105,17 @@ def make_samples(in_queue, out_queue, stop_flag):
             'instance': instance,
             'seed': seed,
         })
-
+        if sample_rate > 0:
+            tree_recorder = TreeRecorder()
+        rng = np.random.RandomState(seed)
+        datas = dict()
         env.seed(seed)
         observation, action_set, reward, done, _ = env.reset(instance)
         while not done:
             scores, scores_are_expert = observation["scores"]
             focus_node_obs = observation["focus_node"]
             node_observation = observation["node_observation"]
+            cum_nnodes, cur_nnodes = reward['cum_nnodes'],reward['cur_nnodes']
             state = utilities.extract_state(node_observation, action_set, focus_node_obs.number)
             if agent is None:
                 action_idx = scores[action_set].argmax()
@@ -116,41 +123,64 @@ def make_samples(in_queue, out_queue, stop_flag):
             else:
                 action_idx = agent.get_action(state,eval=True)
                 action = action_set[action_idx]
+            if scores_are_expert and not stop_flag.is_set():
+                if sample_rate > 0:
+                    tree_recorder.record_branching_decision(focus_node_obs)
+                    keep_sample = rng.rand() < sample_rate
+                    if keep_sample:
+                        datas[focus_node_obs.number] ={
+                                    'episode':episode,
+                                    'sample_counter':sample_counter,
+                                    "state":state,
+                                    'action':action,
+                                    'action_idx':action_idx,
+                                    'scores':scores,
+                                    'cum_nnodes':cum_nnodes,
+                                    'returns':None,
+                                    'reward':None,
+                                    'next_state':[None,None],
+                                    'done':done
+                                }  
+                sample_counter += 1
             try:
-                next_observation, action_set_n, reward, done, info = env.step(action)
-
-                if scores_are_expert and not stop_flag.is_set():
-                    focus_node_obs_n = next_observation["focus_node"]
-                    node_observation_n = next_observation["node_observation"]
-                    next_state = utilities.extract_state(node_observation_n, action_set_n, focus_node_obs_n.number)
-                    data = [state, action, action_idx, scores, reward,  done, info, next_state]
-                    filename = f'{out_dir}/sample_{episode}_{sample_counter}.pkl'
-
-                    with gzip.open(filename, 'wb') as f:
-                        pickle.dump({
-                            'episode': episode,
-                            'instance': instance,
-                            'seed': seed,
-                            'data': data,
-                            }, f)
-                    out_queue.put({
-                        'type': 'sample',
-                        'episode': episode,
-                        'instance': instance,
-                        'seed': seed,
-                        'filename': filename,
-                    })
-                    sample_counter += 1
-
-                observation = next_observation
-                action_set = action_set_n
+                observation, action_set, reward, done, _ = env.step(action)
             except Exception as e:
                 done = True
                 with open("error_log.txt","a") as f:
                     f.write(f"Error occurred solving {instance} with seed {seed}\n")
                     f.write(f"{e}\n")
-
-        print(f"[w {threading.current_thread().name}] episode {episode} done, {sample_counter} samples\n", end='')
+        if datas:
+            # post-process the collected samples (credit assignment) from strong branch policy
+            if sample_rate > 0:
+                datas = tree_recorder.calculate_subtree_sizes_next_state(datas,mode)
+            for key,value in datas.items():
+                episode = value['episode']
+                sample_counter = value['sample_counter']
+                state = value['state']
+                action = value['action']
+                action_idx = value['action_idx']
+                scores = value['scores']
+                cum_nnodes = value['cum_nnodes']
+                reward = value['reward']
+                next_state = value['next_state']
+                done = value['done']
+                filename = f'{out_dir}/sample_{episode}_{sample_counter}.pkl'
+                data = [state, action, action_idx, scores, reward,  done, next_state]
+                with gzip.open(filename, 'wb') as f:
+                    pickle.dump({
+                        'episode': episode,
+                        'instance': instance,
+                        'seed': seed,
+                        'data': data,
+                        }, f)
+                out_queue.put({
+                    'type': 'sample',
+                    'episode': episode,
+                    'instance': instance,
+                    'seed': seed,
+                    'filename': filename,
+                })
+                print(f"[w {threading.current_thread().name}] episode {episode} done, {sample_counter} samples\n", end='')
         out_queue.put({
             'type': 'done',
             'episode': episode,
@@ -160,7 +190,7 @@ def make_samples(in_queue, out_queue, stop_flag):
 
 
 def collect_samples(instances, out_dir, rng, n_samples, n_jobs,
-                    query_expert_prob, time_limit):
+                    query_expert_prob, time_limit, mode):
     """
     Runs branch-and-bound episodes on the given set of instances, and collects
     randomly (state, action) pairs from the 'vanilla-full strong' expert
@@ -197,7 +227,7 @@ def collect_samples(instances, out_dir, rng, n_samples, n_jobs,
     dispatcher = threading.Thread(
             target=send_orders,
             args=(orders_queue, instances, rng.randint(2**32), query_expert_prob,
-                  time_limit, tmp_samples_dir, dispatcher_stop_flag),
+                  time_limit, tmp_samples_dir, dispatcher_stop_flag,mode),
             daemon=True)
     dispatcher.start()
 
@@ -276,6 +306,7 @@ if __name__ == '__main__':
         type=int,
         default=0,
     )
+    parser.add_argument("--mode", type=str, default='mdp', choices=['mdp', 'tmdp+ObjLim', 'tmdp+DFS'], help="Mode for branch env")
     parser.add_argument(
         '-j', '--njobs',
         help='Number of parallel jobs.',
@@ -294,28 +325,28 @@ if __name__ == '__main__':
     if args.problem == 'setcover':
         instances_train = glob.glob('data/instances/setcover/train_400r_750c_0.05d/*.lp')
         instances_valid = glob.glob('data/instances/setcover/valid_400r_750c_0.05d/*.lp')
-        out_dir = 'data/samples_orl/setcover/400r_750c_0.05d'
+        out_dir = 'data/samples_{}/setcover/400r_750c_0.05d'.format(args.mode)
 
     elif args.problem == 'cauctions':
         instances_train = glob.glob('data/instances/cauctions/train_100_500/*.lp')
         instances_valid = glob.glob('data/instances/cauctions/valid_100_500/*.lp')
-        out_dir = 'data/samples_orl/cauctions/100_500'
+        out_dir = 'data/samples_{}/cauctions/100_500'.format(args.mode)
 
     elif args.problem == 'indset':
         instances_train = glob.glob('data/instances/indset/train_500_4/*.lp')
         instances_valid = glob.glob('data/instances/indset/valid_500_4/*.lp')
-        out_dir = 'data/samples_orl/indset/500_4'
+        out_dir = 'data/samples_{}/indset/500_4'.format(args.mode)
 
     elif args.problem == 'ufacilities':
         instances_train = glob.glob('data/instances/ufacilities/train_35_35_5/*.lp')
         instances_valid = glob.glob('data/instances/ufacilities/valid_35_35_5/*.lp')
-        out_dir = 'data/samples_orl/ufacilities/35_35_5'
+        out_dir = 'data/samples_{}/ufacilities/35_35_5'.format(args.mode)
         time_limit = 600
 
     elif args.problem == 'mknapsack':
         instances_train = glob.glob('data/instances/mknapsack/train_100_6/*.lp')
         instances_valid = glob.glob('data/instances/mknapsack/valid_100_6/*.lp')
-        out_dir = 'data/samples_orl/mknapsack/100_6'
+        out_dir = 'data/samples_{}/mknapsack/100_6'.format(args.mode)
         time_limit = 60
 
     else:
@@ -330,9 +361,9 @@ if __name__ == '__main__':
     rng = np.random.RandomState(args.seed)
     collect_samples(instances_train, out_dir + '/train', rng, train_size,
                     args.njobs, query_expert_prob=node_record_prob,
-                    time_limit=time_limit)
+                    time_limit=time_limit, mode=args.mode)
 
     rng = np.random.RandomState(args.seed + 1)
     collect_samples(instances_valid, out_dir + '/valid', rng, valid_size,
                     args.njobs, query_expert_prob=node_record_prob,
-                    time_limit=time_limit)
+                    time_limit=time_limit, mode=args.mode)

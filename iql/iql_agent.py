@@ -141,8 +141,14 @@ class IQL(nn.Module):
     
     def calc_q_loss(self, states, actions, rewards, dones, next_states):
         with torch.no_grad():
-            next_v = self.value_net(next_states)
-            q_target = rewards + (self.gamma * (1 - dones) * next_v) 
+            if isinstance(next_states,tuple):
+                next_states_l,next_states_r = next_states
+                next_l_v = self.value_net(next_states_l)
+                next_r_v = self.value_net(next_states_r)
+                q_target = rewards + (self.gamma * (1 - dones) * (next_l_v+next_r_v)) 
+            else:
+                next_v = self.value_net(next_states)
+                q_target = rewards + (self.gamma * (1 - dones) * next_v) 
 
         q1 = self.critic1(states).gather(1, actions.long())
         q2 = self.critic2(states).gather(1, actions.long())
@@ -162,8 +168,7 @@ class IQL(nn.Module):
         self.value_optimizer.zero_grad()
         for batch in transitions:
             batch = batch.to(self.device)
-            states = (batch.constraint_features, batch.edge_index, batch.edge_attr, 
-            batch.variable_features,batch.action_set,batch.action_set_size)
+            states = (batch.constraint_features, batch.edge_index, batch.edge_attr,batch.variable_features,batch.action_set,batch.action_set_size)
             actions = batch.action_idx.unsqueeze(1)
             value_loss = self.calc_value_loss(states, actions)
             value_loss /= n_samples
@@ -176,8 +181,7 @@ class IQL(nn.Module):
         for batch in transitions:
             batch = batch.to(self.device)
             loss = torch.tensor([0.0], device=self.device)
-            states = (batch.constraint_features, batch.edge_index, batch.edge_attr, 
-            batch.variable_features,batch.action_set,batch.action_set_size)
+            states = (batch.constraint_features, batch.edge_index, batch.edge_attr,batch.variable_features,batch.action_set,batch.action_set_size)
             actions = batch.action_idx.unsqueeze(1)
             actor_loss ,entropy = self.calc_policy_loss(states, actions)
             actor_loss /= n_samples
@@ -198,11 +202,17 @@ class IQL(nn.Module):
         for batch in transitions:
             batch = batch.to(self.device)
             loss = torch.tensor([0.0], device=self.device)
-            states = (batch.constraint_features, batch.edge_index, batch.edge_attr, 
-                    batch.variable_features,batch.action_set,batch.action_set_size)
+            states = (batch.constraint_features, batch.edge_index, batch.edge_attr,batch.variable_features,batch.action_set,batch.action_set_size)
             actions = batch.action_idx.unsqueeze(1)
             rewards = batch.reward
-            next_states = (batch.constraint_features_n, batch.edge_index_n, batch.edge_attr_n, 
+            if batch.tree[0]:
+                next_states_l = (batch.constraint_features_l, batch.edge_index_l, batch.edge_attr_l, 
+                            batch.variable_features_l,batch.action_set_l,batch.action_set_l_size)
+                next_states_r = (batch.constraint_features_r, batch.edge_index_r, batch.edge_attr_r, 
+                            batch.variable_features_r,batch.action_set_r,batch.action_set_r_size)
+                next_states = (next_states_l,next_states_r)
+            else:
+                next_states = (batch.constraint_features_n, batch.edge_index_n, batch.edge_attr_n, 
                             batch.variable_features_n,batch.action_set_n,batch.action_set_n_size)
             dones = batch.done
             critic1_loss, critic2_loss = self.calc_q_loss(states, actions, rewards, dones, next_states)

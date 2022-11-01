@@ -92,34 +92,79 @@ class Transition(torch_geometric.data.Data):
         return Transition(**cuda_values)
 
 class FullTransition(Transition):
-    def __init__(self, state, action, action_idx, scores,reward,done,next_state,cum_nnodes=None):
+    def __init__(self, state, action, action_idx, reward, done, next_state, cum_nnodes=None):
         super().__init__(state,action,cum_nnodes)
-        # action_idx = scores[self.action_set].argmax()
+        # action_idx = scores[self.action_set].argmax()env
         # action_idx = (self.action_set==action).nonzero().item()
         self.action_idx = torch.LongTensor(np.array([action_idx],dtype=np.int32))
-        # self.scores = torch.LongTensor(scores)
         self.reward = torch.FloatTensor(np.expand_dims(-reward, axis=-1))
         self.done = torch.FloatTensor(np.expand_dims(int(done), axis=-1))
 
-        self.constraint_features_n = next_state.constraint_features
-        self.edge_index_n = next_state.edge_index
-        self.edge_attr_n = next_state.edge_attr
-        self.variable_features_n = next_state.variable_features
-        self.action_set_n = next_state.action_set
-        self.action_set_n_size = next_state.action_set_size
-        self.node_id_n = next_state.node_id
-        self.num_nodes_n = next_state.num_nodes
-        assert self.edge_index_n.max()<self.variable_features_n.shape[0]
+        if isinstance(next_state,list):
+            self.tree = True
+            next_state_l,next_state_r = next_state[0],next_state[1]
+            if next_state_l is not None:
+                self.constraint_features_l = next_state_l.constraint_features
+                self.edge_index_l = next_state_l.edge_index
+                self.edge_attr_l = next_state_l.edge_attr
+                self.variable_features_l = next_state_l.variable_features
+                self.action_set_l = next_state_l.action_set
+                self.action_set_l_size = next_state_l.action_set_size
+                self.node_id_l = next_state_l.node_id
+                self.num_nodes_l = next_state_l.num_nodes
+                assert self.edge_index_l.max()<self.variable_features_l.shape[0]
+            else:
+                print('Error in next state')
+
+            if next_state_r is not None:
+                self.constraint_features_r = next_state_r.constraint_features
+                self.edge_index_r = next_state_r.edge_index
+                self.edge_attr_r = next_state_r.edge_attr
+                self.variable_features_r = next_state_r.variable_features
+                self.action_set_r = next_state_r.action_set
+                self.action_set_r_size = next_state_r.action_set_size
+                self.node_id_r = next_state_r.node_id
+                self.num_nodes_r = next_state_r.num_nodes
+                assert self.edge_index_r.max()<self.variable_features_r.shape[0]
+
+            else:
+                self.constraint_features_r = next_state_l.constraint_features
+                self.edge_index_r = next_state_l.edge_index
+                self.edge_attr_r = next_state_l.edge_attr
+                self.variable_features_r = next_state_l.variable_features
+                self.action_set_r = next_state_l.action_set
+                self.action_set_r_size = next_state_l.action_set_size
+                self.node_id_r = next_state_l.node_id
+                self.num_nodes_r = next_state_l.num_nodes
+        else:
+            self.tree = False
+            self.constraint_features_n = next_state.constraint_features
+            self.edge_index_n = next_state.edge_index
+            self.edge_attr_n = next_state.edge_attr
+            self.variable_features_n = next_state.variable_features
+            self.action_set_n = next_state.action_set
+            self.action_set_n_size = next_state.action_set_size
+            self.node_id_n = next_state.node_id
+            self.num_nodes_n = next_state.num_nodes
+        
 
     def __inc__(self, key, value):
         if key == 'edge_index':
             return torch.tensor([[self.constraint_features.size(0)], [self.variable_features.size(0)]])
-        if key == 'edge_index_n':
+        elif key == 'edge_index_n':
             return torch.tensor([[self.constraint_features_n.size(0)], [self.variable_features_n.size(0)]])
+        elif key == 'edge_index_l':
+            return torch.tensor([[self.constraint_features_l.size(0)], [self.variable_features_l.size(0)]])
+        elif key == 'edge_index_r':
+            return torch.tensor([[self.constraint_features_r.size(0)], [self.variable_features_r.size(0)]])
         elif key == 'action_set':
             return self.variable_features.size(0)
         elif key == 'action_set_n':
             return self.variable_features_n.size(0)
+        elif key == 'action_set_l':
+            return self.variable_features_l.size(0)
+        elif key == 'action_set_r':
+            return self.variable_features_r.size(0)
         else:
             return super().__inc__(key, value)
 
@@ -139,10 +184,13 @@ def BuildFullTransition(data_files):
         with gzip.open(sample_file, 'rb') as f:
             sample = pickle.load(f)
         if len(sample['data'])==7:
-            state, action, action_idx, scores, reward, done, next_state = sample['data']
-        elif len(sample['data'])==8:
-            state, action, action_idx, scores, reward, done, info, next_state = sample['data']
-        fulltransition = FullTransition(state, action, action_idx, scores, reward, done, next_state)
+            state, action, action_idx, _, reward, done, next_state = sample['data']
+        else:
+            state, action, action_idx, _, reward, done, info, next_state = sample['data']
+        if isinstance(next_state,list):
+            if next_state[0] is None and next_state[1] is None:
+                continue
+        fulltransition = FullTransition(state, action, action_idx, reward, done, next_state)
         transitions.append(fulltransition)
     random.shuffle(transitions)
     return transitions, stats

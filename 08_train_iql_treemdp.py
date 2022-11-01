@@ -90,31 +90,31 @@ def get_config():
         maximization = False
         valid_path = "data/instances/setcover/valid_400r_750c_0.05d"
         train_path = "data/instances/setcover/train_400r_750c_0.05d"
-        out_dir = 'data/samples_orl/setcover/400r_750c_0.05d'
+        out_dir = 'data/samples_{}/setcover/400r_750c_0.05d'.format(args.mode)
         time_limit = None
     elif config['problem'] == "cauctions":
         maximization = True
         valid_path = "data/instances/cauctions/valid_100_500"
         train_path = "data/instances/cauctions/train_100_500"
-        out_dir = 'data/samples_orl/cauctions/100_500'
+        out_dir = 'data/samples_{}/cauctions/100_500'.format(args.mode)
         time_limit = None
     elif config['problem'] == "indset":
         maximization = True
         valid_path = "data/instances/indset/valid_500_4"
         train_path = "data/instances/indset/train_500_4"
-        out_dir = 'data/samples_orl/indset/500_4'
+        out_dir = 'data/samples_{}/indset/500_4'.format(args.mode)
         time_limit = None
     elif config['problem'] == "ufacilities":
         maximization = False
         valid_path = "data/instances/ufacilities/valid_35_35_5"
         train_path = "data/instances/ufacilities/train_35_35_5"
-        out_dir = 'data/samples_orl/ufacilities/35_35_5'
+        out_dir = 'data/samples_{}/ufacilities/35_35_5'.format(args.mode)
         time_limit = None
     elif config['problem'] == "mknapsack":
         maximization = True
         valid_path = "data/instances/mknapsack/valid_100_6"
         train_path = "data/instances/mknapsack/train_100_6"
-        out_dir = 'data/samples_orl/mknapsack/100_6'
+        out_dir = 'data/samples_{}/mknapsack/100_6'.format(args.mode)
         time_limit = None
     else:
         raise NotImplementedError
@@ -160,7 +160,7 @@ def train(config, args):
         wandb.init(project="rl2branch", name=config['cur_name'], config=config)
 
     # recover training data & validation instances
-    train_files = [str(file) for file in (pathlib.Path(f'data/samples_orl')/config['problem_folder']/'train').glob('sample_*.pkl')]
+    train_files = [str(file) for file in (pathlib.Path(f'data/samples_{args.mode}')/config['problem_folder']/'train').glob('sample_*.pkl')]
     valid_path = config['valid_path']
     train_path = config['train_path']
     valid_instances = [f'{valid_path}/instance_{j+1}.lp' for j in range(config['num_valid_instances'])]
@@ -206,7 +206,7 @@ def train(config, args):
 
     # Already start jobs
     if is_validation_epoch(0):
-        _, v_stats_next, v_queue_next, v_access_next = agent_pool.start_job(valid_batch, sample_rate=0.0, greedy=True, block_policy=True)
+         _, v_stats_next, v_queue_next, v_access_next = agent_pool.start_job(valid_batch, sample_rate=0.0, greedy=True, block_policy=True)
     if is_online_training_epoch(0):
         train_batch = next(train_batches)
         t_samples_next, t_stats_next, t_queue_next, t_access_next = agent_pool.start_job(train_batch, sample_rate=config['sample_rate'], greedy=False, block_policy=True)

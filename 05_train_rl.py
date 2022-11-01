@@ -213,7 +213,7 @@ if __name__ == '__main__':
         # Validation
         if is_validation_epoch(epoch):
             v_queue.join()  # wait for all validation episodes to be processed
-            logger.info('  validation jobs finished')
+            logger.info('validation jobs finished')
 
             v_nnodess = [s['info']['nnodes'] for s in v_stats]
             v_lpiterss = [s['info']['lpiters'] for s in v_stats]
