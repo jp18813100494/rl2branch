@@ -38,7 +38,7 @@ if __name__ == "__main__":
     instances = []
     seeds = [0, 1, 2, 3, 4]
     internal_branchers = ['relpscost']
-    gcnn_models = ['il', 'mdp', 'tmdp+DFS', 'tmdp+ObjLim','iql']
+    gcnn_models = ['il', 'mdp', 'tmdp+DFS', 'tmdp+ObjLim','iql_tmdp+DFS','iql_tmdp+ObjLim','iql_mdp']
     time_limit = 3600
 
     if args.problem == 'setcover':
@@ -114,8 +114,12 @@ if __name__ == "__main__":
                     model.load_state_dict(torch.load(f'actor/{args.problem}/0/tmdp+DFS.pkl'))
                 elif policy['name'] == 'tmdp+ObjLim':
                     model.load_state_dict(torch.load(f'actor/{args.problem}/0/tmdp+ObjLim.pkl'))
-                elif policy['name'] == 'iql':
-                    model.load_state_dict(torch.load(f'actor/{args.problem}/0/iql.pth'))
+                elif policy['name'] == 'iql_tmdp+DFS':
+                    model.load_state_dict(torch.load(f'actor/{args.problem}/0/iql_tmdp+DFS.pth'))
+                elif policy['name'] == 'iql_tmdp+ObjLim':
+                    model.load_state_dict(torch.load(f'actor/{args.problem}/0/iql_tmdp+ObjLim.pth'))
+                elif policy['name'] == 'iql_mdp':
+                    model.load_state_dict(torch.load(f'actor/{args.problem}/0/iql_mdp.pth'))
                 else:
                     raise Exception(f"Unrecognized GNN policy {policy[name]}")
                 loaded_models[policy['name']] = model
