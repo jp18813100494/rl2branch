@@ -99,7 +99,7 @@ if __name__ == '__main__':
     import torch.nn.functional as F
     import utilities
     from brain import Brain
-    from agent import AgentPool
+    from agent_rl import AgentPool
 
     if config['gpu'] > -1:
         torch.backends.cudnn.deterministic = True
