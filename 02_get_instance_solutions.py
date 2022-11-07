@@ -73,24 +73,24 @@ if __name__ == '__main__':
     args = parser.parse_args()
 
     if args.problem == 'setcover':
-        instance_dir = 'data/instances/setcover/valid_400r_750c_0.05d'
-        # instance_dir = 'data/instances/setcover/train_400r_750c_0.05d'
+        # instance_dir = 'data/instances/setcover/valid_400r_750c_0.05d'
+        instance_dir = 'data/instances/setcover/train_400r_750c_0.05d'
         instances = glob.glob(instance_dir + '/*.lp')
     elif args.problem == 'cauctions':
-        instance_dir = 'data/instances/cauctions/valid_100_500'
-        # instance_dir = 'data/instances/cauctions/train_100_500'
+        # instance_dir = 'data/instances/cauctions/valid_100_500'
+        instance_dir = 'data/instances/cauctions/train_100_500'
         instances = glob.glob(instance_dir + '/*.lp')
     elif args.problem == 'indset':
-        instance_dir = 'data/instances/indset/valid_500_4'
-        # instance_dir = 'data/instances/indset/train_500_4'
+        # instance_dir = 'data/instances/indset/valid_500_4'
+        instance_dir = 'data/instances/indset/train_500_4'
         instances = glob.glob(instance_dir + '/*.lp')
     elif args.problem == 'ufacilities':
-        instance_dir = 'data/instances/ufacilities/valid_35_35_5'
-        # instance_dir = 'data/instances/ufacilities/train_35_35_5'
+        # instance_dir = 'data/instances/ufacilities/valid_35_35_5'
+        instance_dir = 'data/instances/ufacilities/train_35_35_5'
         instances = glob.glob(instance_dir + '/*.lp')
     elif args.problem == 'mknapsack':
-        instance_dir = 'data/instances/mknapsack/valid_100_6'
-        # instance_dir = 'data/instances/mknapsack/train_100_6'
+        # instance_dir = 'data/instances/mknapsack/valid_100_6'
+        instance_dir = 'data/instances/mknapsack/train_100_6'
         instances = glob.glob(instance_dir + '/*.lp')
     else:
         raise NotImplementedError

@@ -69,7 +69,7 @@ class Transition(torch_geometric.data.Data):
         self.action_set_size = state.action_set_size
         self.node_id = state.node_id
         self.num_nodes = state.num_nodes
-        assert self.edge_index.max()<self.variable_features.shape[0]
+        # assert self.edge_index.max()<self.variable_features.shape[0]
         self.action = torch.LongTensor(np.array([action],dtype=np.int32))
         self.cum_nnodes = cum_nnodes
         self.returns = None
