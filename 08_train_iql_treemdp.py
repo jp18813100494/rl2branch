@@ -31,6 +31,8 @@ def get_config():
     parser.add_argument("--hidden_size", type=int, default=64, help="")
     parser.add_argument("--actor_lr", type=float, default=3e-4, help="actor learning_rate")
     parser.add_argument("--critic_lr", type=float, default=3e-4, help="critic learning_rate")
+    parser.add_argument("--actor_on_lr", type=float, default=1e-5, help="actor learning_rate")
+    parser.add_argument("--critic_on_lr", type=float, default=1e-5, help="critic learning_rate")
     parser.add_argument("--temperature", type=float, default=3, help="")
     parser.add_argument("--expectile", type=float, default=0.7, help="")
     parser.add_argument("--tau", type=float, default=5e-3, help="")
@@ -303,7 +305,7 @@ def train(config, args):
             elif agent.actor_scheduler.num_bad_epochs == 5:
                 logger.info(f"5 epochs without improvement, decreasing learning rate")
             elif agent.actor_scheduler.num_bad_epochs == 10:
-                logger.info(f"10 epochs without improvement, early stopping")
+                logger.info(f"Offline: 10 epochs without improvement, switch to online")
                 if config['train_stat'] == 'offline':
                     logger.info(f'Offline for {epoch} epochs')
                     config['train_stat'] = 'online'
@@ -312,6 +314,7 @@ def train(config, args):
                     train_batch = next(train_batches)
                     t_samples_next, t_stats_next, t_queue_next, t_access_next = agent_pool.start_job(train_batch, sample_rate=config['sample_rate'], greedy=False, block_policy=True)
                 else:
+                    logger.info(f"Online:10 epochs without improvement, early stopping")
                     break
 
     if config["wandb"]:
