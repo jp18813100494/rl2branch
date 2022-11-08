@@ -36,6 +36,9 @@ class IQL(nn.Module):
         self.temperature = torch.FloatTensor([temperature]).to(device)
         self.expectile = torch.FloatTensor([expectile]).to(device)
         self.seed=seed
+        self.actor_on_lr = config["actor_on_lr"]
+        self.critic_on_lr = config["critic_on_lr"]
+
            
         # Actor Network 
         self.actor_local = Actor(hidden_size, seed).to(device)
@@ -75,10 +78,10 @@ class IQL(nn.Module):
         
 
     def reset_optimizer(self):
-        self.actor_optimizer = optim.Adam(self.actor_local.parameters(), lr=self.actor_lr) 
-        self.critic1_optimizer = optim.Adam(self.critic1.parameters(), lr=self.critic_lr)
-        self.critic2_optimizer = optim.Adam(self.critic2.parameters(), lr=self.critic_lr)
-        self.value_optimizer = optim.Adam(self.value_net.parameters(), lr=self.critic_lr)
+        self.actor_optimizer = optim.Adam(self.actor_local.parameters(), lr=self.actor_on_lr) 
+        self.critic1_optimizer = optim.Adam(self.critic1.parameters(), lr=self.critic_on_lr)
+        self.critic2_optimizer = optim.Adam(self.critic2.parameters(), lr=self.critic_on_lr)
+        self.value_optimizer = optim.Adam(self.value_net.parameters(), lr=self.critic_on_lr)
 
     def sample_action_idx(self, states, greedy):
         if isinstance(greedy, bool):
