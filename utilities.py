@@ -112,7 +112,7 @@ class FullTransition(Transition):
                 self.action_set_l_size = next_state_l.action_set_size
                 self.node_id_l = next_state_l.node_id
                 self.num_nodes_l = next_state_l.num_nodes
-                assert self.edge_index_l.max()<self.variable_features_l.shape[0]
+                # assert self.edge_index_l.max()<self.variable_features_l.shape[0]
             else:
                 print('Error in next state')
 
@@ -125,7 +125,7 @@ class FullTransition(Transition):
                 self.action_set_r_size = next_state_r.action_set_size
                 self.node_id_r = next_state_r.node_id
                 self.num_nodes_r = next_state_r.num_nodes
-                assert self.edge_index_r.max()<self.variable_features_r.shape[0]
+                # assert self.edge_index_r.max()<self.variable_features_r.shape[0]
 
             else:
                 self.constraint_features_r = next_state_l.constraint_features

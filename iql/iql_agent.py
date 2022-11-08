@@ -245,8 +245,8 @@ class IQL(nn.Module):
                         batch.variable_features_n,batch.action_set_n,batch.action_set_n_size)
         dones = batch.done
 
-        assert batch.edge_index.max()<batch.variable_features.shape[0]
-        assert batch.edge_index_n.max()<batch.variable_features_n.shape[0]
+        # assert batch.edge_index.max()<batch.variable_features.shape[0]
+        # assert batch.edge_index_n.max()<batch.variable_features_n.shape[0]
         
         # states, actions, rewards, next_states, dones = batch        
         self.value_optimizer.zero_grad()

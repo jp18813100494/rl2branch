@@ -77,8 +77,8 @@ if __name__ == '__main__':
         instance_dir = 'data/instances/setcover/train_400r_750c_0.05d'
         instances = glob.glob(instance_dir + '/*.lp')
     elif args.problem == 'cauctions':
-        # instance_dir = 'data/instances/cauctions/valid_100_500'
-        instance_dir = 'data/instances/cauctions/train_100_500'
+        instance_dir = 'data/instances/cauctions/valid_100_500'
+        # instance_dir = 'data/instances/cauctions/train_100_500'
         instances = glob.glob(instance_dir + '/*.lp')
     elif args.problem == 'indset':
         # instance_dir = 'data/instances/indset/valid_500_4'
