@@ -238,14 +238,18 @@ class Actor(GNNPolicy):
         action = dist.sample()
         return action, dist
 
-    def get_action(self,state,eval=False):
+    def get_action(self,state,eval=False, num_samples=1):
         action_logits = self.forward(state,eval)
-        if eval:
-            action_idx = action_logits.argmax()
+        if num_samples == 1:
+            if eval:
+                action_idx = action_logits.argmax()
+            else:
+                dist = Categorical(logits=action_logits)
+                action_idx = dist.sample()
         else:
             dist = Categorical(logits=action_logits)
-            action_idx = dist.sample()
-        return action_idx.detach().cpu()
+            action_idx = dist.sample(sample_shape=[num_samples]).T
+        return action_idx
 
 
 class Critic(GNNPolicy):

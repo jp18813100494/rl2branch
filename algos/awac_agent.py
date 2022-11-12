@@ -3,85 +3,55 @@ import torch
 import torch_geometric
 import torch.optim as optim
 import torch.nn as nn
+import torch.nn.functional as F
+from torch.distributions import Categorical
 from torch.nn.utils import clip_grad_norm_
-from iql.network import Critic, Actor, Value
+from algos.network import Critic, Actor
 
 
-class IQL(nn.Module):
-    def __init__(self,
-                state_size,
-                action_size,
-                config,
-                actor_lr,
-                critic_lr,
-                hidden_size,
-                tau,
-                gamma,
-                temperature,
-                expectile,
-                hard_update_every,
-                clip_grad_param,
-                seed,
-                device
-                ): 
-        super(IQL, self).__init__()
+class AWAC(nn.Module):
+    def __init__(self,config): 
+        super(AWAC, self).__init__()
         self.config = config
-        self.device = device
-        self.actor_lr = actor_lr
-        self.critic_lr = critic_lr
-        self.tau = tau
-        self.gamma = torch.FloatTensor([gamma]).to(device)
-        self.hard_update_every = hard_update_every
-        self.clip_grad_param = clip_grad_param
-        self.temperature = torch.FloatTensor([temperature]).to(device)
-        self.expectile = torch.FloatTensor([expectile]).to(device)
-        self.seed=seed
+        self.device = config["device"]
+        self.actor_lr = config["actor_lr"]
+        self.critic_lr = config["critic_lr"]
+        self.tau = config["tau"]
+        self.gamma = config["gamma"]
+        self.hard_update_every = config["hard_update_every"]
+        self.clip_grad_param = config["clip_grad_param"]
+        self.lammbda = config["lammbda"]
+        self.use_adv = config["use_adv"]
+        self.num_action_samples=config["num_action_samples"]
+        self.seed=config["seed"]
         self.actor_on_lr = config["actor_on_lr"]
         self.critic_on_lr = config["critic_on_lr"]
+        self.hidden_size = config['hidden_size']
 
            
         # Actor Network 
-        self.actor_local = Actor(hidden_size, seed).to(device)
-        self.actor_optimizer = optim.Adam(self.actor_local.parameters(), lr=actor_lr)     
+        self.actor_local = Actor(self.hidden_size, self.seed).to(self.device)
+        self.actor_optimizer = optim.Adam(self.actor_local.parameters(), lr=self.actor_lr)     
         
         # Critic Network (w/ Target Network)
-        self.critic1 = Critic(hidden_size, 2).to(device)
-        self.critic2 = Critic(hidden_size, 1).to(device)
-        
-        assert self.critic1.parameters() != self.critic2.parameters()
-        
-        self.critic1_target = Critic(hidden_size).to(device)
-        self.critic1_target.load_state_dict(self.critic1.state_dict())
+        self.critic = Critic(self.hidden_size, 2).to(self.device)
+        self.critic_target = Critic(self.hidden_size).to(self.device)
+        self.critic_target.load_state_dict(self.critic.state_dict())
 
-        self.critic2_target = Critic(hidden_size).to(device)
-        self.critic2_target.load_state_dict(self.critic2.state_dict())
-
-        self.critic1_optimizer = optim.Adam(self.critic1.parameters(), lr=critic_lr)
-        self.critic2_optimizer = optim.Adam(self.critic2.parameters(), lr=critic_lr) 
-        
-        self.value_net = Value(hidden_size).to(device)
-        
-        self.value_optimizer = optim.Adam(self.value_net.parameters(), lr=critic_lr)
+        self.critic_optimizer = optim.Adam(self.critic.parameters(), lr=self.critic_lr)
         self.step = 0
 
         self.actor_scheduler = Scheduler(self.actor_optimizer, mode='min', patience=5, factor=0.2, verbose=True)
-        self.critic1_scheduler = Scheduler(self.critic1_optimizer, mode='min', patience=5, factor=0.2, verbose=True)
-        self.critic2_scheduler = Scheduler(self.critic2_optimizer, mode='min', patience=5, factor=0.2, verbose=True)
-        self.value_scheduler = Scheduler(self.value_optimizer, mode='min', patience=5, factor=0.2, verbose=True)
-        
+        self.critic_scheduler = Scheduler(self.critic_optimizer, mode='min', patience=5, factor=0.2, verbose=True)
+
 
     def scheduler_step(self,metric):
         self.actor_scheduler.step(metric)
-        self.critic1_scheduler.step(metric)
-        self.critic2_scheduler.step(metric)
-        self.value_scheduler.step(metric)
-        
+        self.critic_scheduler.step(metric)       
 
     def reset_optimizer(self):
         self.actor_optimizer = optim.Adam(self.actor_local.parameters(), lr=self.actor_on_lr) 
-        self.critic1_optimizer = optim.Adam(self.critic1.parameters(), lr=self.critic_on_lr)
-        self.critic2_optimizer = optim.Adam(self.critic2.parameters(), lr=self.critic_on_lr)
-        self.value_optimizer = optim.Adam(self.value_net.parameters(), lr=self.critic_on_lr)
+        self.critic_optimizer = optim.Adam(self.critic.parameters(), lr=self.critic_on_lr)
 
     def sample_action_idx(self, states, greedy):
         if isinstance(greedy, bool):
@@ -108,56 +78,60 @@ class IQL(nn.Module):
 
         return action_idxs
 
-    def get_action(self, state, eval=False):
+    def get_action(self, state, eval=False,num_samples=1):
         """Returns actions for given state as per current policy."""
-        state = state.to(self.device)
+        if num_samples==1:
+            state = state.to(self.device)
         with torch.no_grad():
-            action = self.actor_local.get_action(state, eval)
-        return action
+            action = self.actor_local.get_action(state, eval, num_samples)
+        if num_samples == 1:    
+            return action.detach().cpu()
+        else:
+            return action
 
     def calc_policy_loss(self, states, actions):
-        with torch.no_grad():
-            v = self.value_net(states)
-            q1 = self.critic1_target(states).gather(1, actions.long())
-            q2 = self.critic2_target(states).gather(1, actions.long())
-            min_Q = torch.min(q1,q2)
-
-        exp_a = torch.exp((min_Q - v) * self.temperature)
-        exp_a = torch.min(exp_a, torch.FloatTensor([100.0]).to(self.device)).squeeze(-1)
-
-        _, dist = self.actor_local.evaluate(states)
-        log_probs = dist.log_prob(actions.squeeze(-1))
-        actor_loss = -(exp_a * log_probs).mean()
+        logits = self.actor_local(states)
+        dist = Categorical(logits=logits)
+        log_prob = dist.log_prob(actions.squeeze(-1)).view(-1,1)
         entropy = dist.entropy().sum()
+        with torch.no_grad():
+            if self.use_adv:
+                qs = self.critic_target(states)  # [#. samples x # actions]
+                action_probs = F.softmax(logits, dim=-1)
+                vs = (qs * action_probs).sum(dim=-1, keepdims=True)
+                qas = qs.gather(1, actions.long())
+                adv = qas - vs
+            else:
+                adv = self.critic_target(states).gather(1, actions.long())
 
+            weight_term = torch.exp(1.0 / self.lammbda * adv)
+        actor_loss = (log_prob * weight_term).mean() * -1
         return actor_loss,entropy
     
-    def calc_value_loss(self, states, actions):
-        with torch.no_grad():
-            q1 = self.critic1_target(states).gather(1, actions.long())
-            q2 = self.critic2_target(states).gather(1, actions.long())
-            min_Q = torch.min(q1,q2)
-        
-        value = self.value_net(states)
-        value_loss = loss(min_Q - value, self.expectile).mean()
-        return value_loss
-    
     def calc_q_loss(self, states, actions, rewards, dones, next_states):
+        dones = torch.unsqueeze(dones,-1)
+        rewards = torch.unsqueeze(rewards,-1)
         with torch.no_grad():
             if isinstance(next_states,tuple):
                 next_states_l,next_states_r = next_states
-                next_l_v = self.value_net(next_states_l)
-                next_r_v = self.value_net(next_states_r)
-                q_target = rewards + (self.gamma * (1 - dones) * (next_l_v+next_r_v)) 
+                #left nodes value func
+                qs_l = self.critic_target(next_states_l)  # [minibatch size x #.actions]
+                sampled_as_l = self.get_action(next_states_l, eval=False, num_samples=self.num_action_samples)  # [ minibatch size x #. action samples]
+                mean_qsa_l = qs_l.gather(1, sampled_as_l).mean(dim=-1, keepdims=True)  # [minibatch size x 1]
+                #right nodes value func
+                qs_r = self.critic_target(next_states_r)  # [minibatch size x #.actions]
+                sampled_as_r = self.get_action(next_states_r, eval=False, num_samples=self.num_action_samples)  # [ minibatch size x #. action samples]
+                mean_qsa_r = qs_r.gather(1, sampled_as_r).mean(dim=-1, keepdims=True)  # [minibatch size x 1]
+                q_target = rewards + self.gamma * (1 - dones) * (mean_qsa_l+mean_qsa_r)
             else:
-                next_v = self.value_net(next_states)
-                q_target = rewards + (self.gamma * (1 - dones) * next_v) 
+                qs = self.critic_target(next_states)  # [minibatch size x #.actions]
+                sampled_as = self.get_action(next_states, eval=False, num_samples=self.num_action_samples)  # [ minibatch size x #. action samples]
+                mean_qsa = qs.gather(1, sampled_as).mean(dim=-1, keepdims=True)  # [minibatch size x 1]
+                q_target = rewards + self.gamma * mean_qsa * (1 - dones)
 
-        q1 = self.critic1(states).gather(1, actions.long())
-        q2 = self.critic2(states).gather(1, actions.long())
-        critic1_loss = ((q1 - q_target)**2).mean() 
-        critic2_loss = ((q2 - q_target)**2).mean()
-        return critic1_loss, critic2_loss
+        q_val = self.critic(states).gather(1, actions.long())
+        critic_loss = ((q_val - q_target)**2).mean() 
+        return critic_loss
 
     def update(self, transitions):
         n_samples = len(transitions)
@@ -167,18 +141,6 @@ class IQL(nn.Module):
 
         transitions = torch_geometric.data.DataLoader(transitions, batch_size=self.config["batch_size"], shuffle=True)
         stats = {}
-
-        self.value_optimizer.zero_grad()
-        for batch in transitions:
-            batch = batch.to(self.device)
-            states = (batch.constraint_features, batch.edge_index, batch.edge_attr,batch.variable_features,batch.action_set,batch.action_set_size)
-            actions = batch.action_idx.unsqueeze(1)
-            value_loss = self.calc_value_loss(states, actions)
-            value_loss /= n_samples
-            value_loss.backward()
-            # Update stats
-            stats['value_loss'] = stats.get('value_loss', 0.0) + value_loss.item()
-        self.value_optimizer.step()
 
         self.actor_optimizer.zero_grad()
         for batch in transitions:
@@ -193,15 +155,15 @@ class IQL(nn.Module):
             loss += - self.config['entropy_bonus']*entropy
 
             loss.backward()
+            clip_grad_norm_(self.actor_local.parameters(), self.clip_grad_param)
+
             # Update stats
             stats['actor_loss'] = stats.get('actor_loss', 0.0) + actor_loss.item()
             stats['loss'] = stats.get('loss', 0.0) + loss.item()
             stats['entropy'] = stats.get('entropy', 0.0) + entropy.item()
         self.actor_optimizer.step()
 
-        self.critic1_optimizer.zero_grad()
-        self.critic2_optimizer.zero_grad()
-
+        self.critic_optimizer.zero_grad()
         for batch in transitions:
             batch = batch.to(self.device)
             loss = torch.tensor([0.0], device=self.device)
@@ -218,20 +180,16 @@ class IQL(nn.Module):
                 next_states = (batch.constraint_features_n, batch.edge_index_n, batch.edge_attr_n, 
                             batch.variable_features_n,batch.action_set_n,batch.action_set_n_size)
             dones = batch.done
-            critic1_loss, critic2_loss = self.calc_q_loss(states, actions, rewards, dones, next_states)
+            critic1_loss = self.calc_q_loss(states, actions, rewards, dones, next_states)
             critic1_loss /= n_samples
             critic1_loss.backward()
-            clip_grad_norm_(self.critic1.parameters(), self.clip_grad_param)
+            clip_grad_norm_(self.critic.parameters(), self.clip_grad_param)
 
-            critic2_loss /= n_samples
-            critic2_loss.backward()
-            clip_grad_norm_(self.critic2.parameters(), self.clip_grad_param)
             # Update stats
             stats['critic1_loss'] = stats.get('critic1_loss', 0.0) + critic1_loss.item()
-            stats['critic2_loss'] = stats.get('critic2_loss', 0.0) + critic2_loss.item()
+            stats['critic2_loss'] = stats.get('critic2_loss', 0.0) 
 
-        self.critic1_optimizer.step()
-        self.critic2_optimizer.step()
+        self.critic_optimizer.step()
         return stats
 
 
@@ -245,15 +203,6 @@ class IQL(nn.Module):
                         batch.variable_features_n,batch.action_set_n,batch.action_set_n_size)
         dones = batch.done
 
-        # assert batch.edge_index.max()<batch.variable_features.shape[0]
-        # assert batch.edge_index_n.max()<batch.variable_features_n.shape[0]
-        
-        # states, actions, rewards, next_states, dones = batch        
-        self.value_optimizer.zero_grad()
-        value_loss = self.calc_value_loss(states, actions)
-        value_loss.backward()
-        self.value_optimizer.step()
-
         actor_loss,_ = self.calc_policy_loss(states, actions)
         self.actor_optimizer.zero_grad()
         actor_loss.backward()
@@ -262,22 +211,17 @@ class IQL(nn.Module):
         critic1_loss, critic2_loss = self.calc_q_loss(states, actions, rewards, dones, next_states)
 
         # critic 1
-        self.critic1_optimizer.zero_grad()
+        self.critic_optimizer.zero_grad()
         critic1_loss.backward()
-        clip_grad_norm_(self.critic1.parameters(), self.clip_grad_param)
-        self.critic1_optimizer.step()
-        # critic 2
-        self.critic2_optimizer.zero_grad()
-        critic2_loss.backward()
-        clip_grad_norm_(self.critic2.parameters(), self.clip_grad_param)
-        self.critic2_optimizer.step()
+        clip_grad_norm_(self.critic.parameters(), self.clip_grad_param)
+        self.critic_optimizer.step()
 
         if self.step % self.hard_update_every == 0:
             # ----------------------- update target networks ----------------------- #
             self.hard_update(self.critic1, self.critic1_target)
             self.hard_update(self.critic2, self.critic2_target)
         
-        return actor_loss.item(), critic1_loss.item(), critic2_loss.item(), value_loss.item()
+        return actor_loss.item(), critic1_loss.item(), critic2_loss.item(), 0
     
     def hard_update(self, local_model, target_model):
         for target_param, local_param in zip(target_model.parameters(), local_model.parameters()):

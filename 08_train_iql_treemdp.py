@@ -1,68 +1,58 @@
 import pathlib
 import os
-import shutil
 os.environ['CUDA_LAUNCH_BLOCKING'] = '1'
 import os.path as osp
 import sys
 import datetime
 import numpy as np
 import torch
-import torch.nn.functional as F
-import torch_geometric
 import wandb
 import argparse
 import json
 import utilities
-import random
 import glob
 import pprint
-from collections import deque
-from iql.iql_agent import IQL,save,get_lr
-from utilities import Scheduler,BuildFullTransition,evaluate,wandb_eval_log
-from envs.branch_env import branch_env
-from collect_samples import collect_online
+from algos.iql_agent import IQL,save,get_lr
+from algos.awac_agent import AWAC
+from utilities import BuildFullTransition
 from agent import AgentPool
 from scipy.stats.mstats import gmean
 
 def get_config():
     parser = argparse.ArgumentParser(description='RL')
     parser.add_argument('--config', type=str, default='config/setcover/config_iql_mdp.json', help='path to yaml config file')
-    parser.add_argument("--algo_name", type=str, default="IQL", help="Run name, default: SAC")
-    parser.add_argument("--hidden_size", type=int, default=64, help="")
-    parser.add_argument("--actor_lr", type=float, default=3e-4, help="actor learning_rate")
-    parser.add_argument("--critic_lr", type=float, default=3e-4, help="critic learning_rate")
-    parser.add_argument("--actor_on_lr", type=float, default=1e-6, help="actor learning_rate")
-    parser.add_argument("--critic_on_lr", type=float, default=1e-6, help="critic learning_rate")
-    parser.add_argument("--temperature", type=float, default=3, help="")
-    parser.add_argument("--expectile", type=float, default=0.7, help="")
-    parser.add_argument("--tau", type=float, default=5e-3, help="")
+    parser.add_argument("--algo_name", type=str, default="IQL", help="Run name, default: IQL")
+    # parser.add_argument("--hidden_size", type=int, default=64, help="")
+    # parser.add_argument("--actor_lr", type=float, default=3e-4, help="actor learning_rate")
+    # parser.add_argument("--critic_lr", type=float, default=3e-4, help="critic learning_rate")
+    # parser.add_argument("--actor_on_lr", type=float, default=1e-6, help="actor learning_rate")
+    # parser.add_argument("--critic_on_lr", type=float, default=1e-6, help="critic learning_rate")
+    # parser.add_argument("--temperature", type=float, default=3, help="")
+    # parser.add_argument("--expectile", type=float, default=0.7, help="")
+    # parser.add_argument("--tau", type=float, default=5e-3, help="")
     parser.add_argument("--entropy_bonus", type=float, default=1e-5, help="")
-    parser.add_argument("--gamma", type=float, default=0.99, help="")
-    parser.add_argument("--hard_update_every", type=int, default=10, help="")
-    parser.add_argument("--clip_grad_param", type=int, default=100, help="")
+    # parser.add_argument("--gamma", type=float, default=0.99, help="")
+    # parser.add_argument("--hard_update_every", type=int, default=10, help="")
+    # parser.add_argument("--clip_grad_param", type=int, default=100, help="")
 
-    parser.add_argument("--max_epochs", type=int, default=1000, help="Number of max_epochs, default: 1000")
-    parser.add_argument("--save_every", type=int, default=10, help="Saves the network every x epochs, default: 25")
+    # parser.add_argument("--max_epochs", type=int, default=1000, help="Number of max_epochs, default: 1000")
+    # parser.add_argument("--save_every", type=int, default=10, help="Saves the network every x epochs, default: 25")
     parser.add_argument("--eval_every", type=int, default=10, help="")
-    parser.add_argument("--eval_run", type=int, default=5, help="")
+    # parser.add_argument("--eval_run", type=int, default=5, help="")
     parser.add_argument("--num_workers", type=int, default=16, help="")
     parser.add_argument("--num_valid_seeds", type=int, default=5, help="")
-    parser.add_argument("--batch_size", type=int, default=32, help="Batch size, default: 256")
-    parser.add_argument("--valid_batch_size", type=int, default=128, help="Valid Batch size, default: 256")
+    # parser.add_argument("--batch_size", type=int, default=32, help="Batch size, default: 256")
+    # parser.add_argument("--valid_batch_size", type=int, default=128, help="Valid Batch size, default: 256")
     parser.add_argument("--num_valid_instances", type=int, default=20, help="Number of valid instances for branch_env")
     parser.add_argument("--num_train_samples", type=int, default=500, help="Number of valid instances for branch_env")
-    parser.add_argument("--epoch_train_size", type=int, default=2000, help="Number of train samples in every epoch")
     parser.add_argument("--num_episodes_per_epoch", type=int, default=10, help="Number of train samples in every epoch")
-    parser.add_argument("--njobs", type=int, default=4, help='Number of parallel jobs.')
-    parser.add_argument("--num_repeat", type=int, default=5, help='Number of repeat for sample data')
-    parser.add_argument("--node_record_prob", type=float, default=1.0, help='Probability for recording tree nodes')
     parser.add_argument("--query_expert_prob", type=float, default=1.0, help='Probability for query the expert')
     parser.add_argument("--train_stat", type=str, default='offline', choices=['offline', 'online'], help="Init stat for agent")
     
     parser.add_argument('--problem',default='setcover',choices=['setcover', 'cauctions', 'ufacilities', 'indset', 'mknapsack'],help='MILP instance type to process.')
     parser.add_argument("--mode", type=str, default='mdp', choices=['mdp', 'tmdp+ObjLim', 'tmdp+DFS'], help="Mode for branch env")
     parser.add_argument("--time_limit", type=int, default=4000, help="Timelimit of the solver")
-    parser.add_argument("--sample_rate", type=float, default=1.0, help="")
+    # parser.add_argument("--sample_rate", type=float, default=1.0, help="")
 
     parser.add_argument('--seed',help='Random generator seed.',type=int,default=0)
     parser.add_argument('--gpu',help='CUDA GPU id (-1 for CPU).',type=int,default=0)
@@ -149,7 +139,7 @@ def mkdirs(config, args, logger):
     logger.info(f'Parsed config from {args.config}')
     os.makedirs(osp.join(config["model_dir"], 'code'))
     os.makedirs(osp.join(config["model_dir"], 'models'))
-    os.system('cp -r config iql envs *.json  *.py {} {}'.format(args.config, osp.join(config["model_dir"], 'code')))
+    os.system('cp -r config algos envs *.json  *.py {} {}'.format(args.config, osp.join(config["model_dir"], 'code')))
 
 def train(config, args):
     torch.manual_seed(config['seed'])
@@ -182,23 +172,15 @@ def train(config, args):
     train_batches = train_batch_generator()
     logger.info(f"Training on {len(train_files)} training instances and {len(valid_instances)} validation instances")
 
-    env = branch_env(valid_instances,valid_sols,config)
     batches = 0
-    agent = IQL(state_size=env.observation_space.shape[0],
-                action_size=env.action_space.shape[0],
-                config=config,
-                actor_lr=config['actor_lr'],
-                critic_lr=config['critic_lr'],
-                hidden_size=config['hidden_size'],
-                tau=config['tau'],
-                gamma=config['gamma'],
-                temperature=config['temperature'],
-                expectile=config['expectile'],
-                hard_update_every=config['hard_update_every'],
-                clip_grad_param=config['clip_grad_param'],
-                seed = config['seed'],
-                device=config['device'])
-    logger.info(f'Epoch:0, Actor_lr:{get_lr(agent.actor_optimizer)},Critic_lr:{get_lr(agent.value_optimizer)}')
+    if config['algo_name'] == 'IQL':
+        agent = IQL(config=config)
+        logger.info(f'Epoch:0, Actor_lr:{get_lr(agent.actor_optimizer)},Critic_lr:{get_lr(agent.value_optimizer)}')
+    elif config['algo_name'] == 'AWAC':
+        agent = AWAC(config=config)
+        logger.info(f'Epoch:0, Actor_lr:{get_lr(agent.actor_optimizer)},Critic_lr:{get_lr(agent.critic_optimizer)}')
+    else:
+        logger.info('Provide the exact algorithm name')
     agent_pool = AgentPool(agent, config['num_workers'], config['time_limit'], config["mode"])
     agent_pool.start()
     

@@ -17,7 +17,7 @@ import random
 import glob
 import pprint
 from collections import deque
-from iql.iql_agent import IQL,save,get_lr
+from algos.iql_agent import IQL,save,get_lr
 from utilities import Scheduler,BuildFullTransition,evaluate,wandb_eval_log
 from envs.branch_env import branch_env
 from collect_samples import collect_online

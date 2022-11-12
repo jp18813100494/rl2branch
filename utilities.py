@@ -17,7 +17,7 @@ from torch.multiprocessing import Process
 from datetime import datetime
 from pathlib import Path
 from scipy.stats.mstats import gmean
-from iql.iql_agent import save
+from algos.iql_agent import save
 import random
 
 
