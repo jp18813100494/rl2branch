@@ -13,7 +13,7 @@
     "hard_update_every": 10,
     "clip_grad_param": 100,
 
-    "max_epochs": 200,
+    "max_epochs": 1000,
     "save_every": 100,
     "eval_every": 10,
     "eval_run": 32,
