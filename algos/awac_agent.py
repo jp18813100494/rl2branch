@@ -34,24 +34,24 @@ class AWAC(nn.Module):
         self.actor_optimizer = optim.Adam(self.actor_local.parameters(), lr=self.actor_lr)     
         
         # Critic Network (w/ Target Network)
-        self.critic = Critic(self.hidden_size, 2).to(self.device)
-        self.critic_target = Critic(self.hidden_size).to(self.device)
-        self.critic_target.load_state_dict(self.critic.state_dict())
+        self.critic1 = Critic(self.hidden_size, 2).to(self.device)
+        self.critic1_target = Critic(self.hidden_size).to(self.device)
+        self.critic1_target.load_state_dict(self.critic1.state_dict())
 
-        self.critic_optimizer = optim.Adam(self.critic.parameters(), lr=self.critic_lr)
+        self.critic1_optimizer = optim.Adam(self.critic1.parameters(), lr=self.critic_lr)
         self.step = 0
 
         self.actor_scheduler = Scheduler(self.actor_optimizer, mode='min', patience=5, factor=0.2, verbose=True)
-        self.critic_scheduler = Scheduler(self.critic_optimizer, mode='min', patience=5, factor=0.2, verbose=True)
+        self.critic1_scheduler = Scheduler(self.critic1_optimizer, mode='min', patience=5, factor=0.2, verbose=True)
 
 
     def scheduler_step(self,metric):
         self.actor_scheduler.step(metric)
-        self.critic_scheduler.step(metric)       
+        self.critic1_scheduler.step(metric)       
 
     def reset_optimizer(self):
         self.actor_optimizer = optim.Adam(self.actor_local.parameters(), lr=self.actor_on_lr) 
-        self.critic_optimizer = optim.Adam(self.critic.parameters(), lr=self.critic_on_lr)
+        self.critic1_optimizer = optim.Adam(self.critic1.parameters(), lr=self.critic_on_lr)
 
     def sample_action_idx(self, states, greedy):
         if isinstance(greedy, bool):
@@ -96,13 +96,13 @@ class AWAC(nn.Module):
         entropy = dist.entropy().sum()
         with torch.no_grad():
             if self.use_adv:
-                qs = self.critic_target(states)  # [#. samples x # actions]
+                qs = self.critic1_target(states)  # [#. samples x # actions]
                 action_probs = F.softmax(logits, dim=-1)
                 vs = (qs * action_probs).sum(dim=-1, keepdims=True)
                 qas = qs.gather(1, actions.long())
                 adv = qas - vs
             else:
-                adv = self.critic_target(states).gather(1, actions.long())
+                adv = self.critic1_target(states).gather(1, actions.long())
 
             weight_term = torch.exp(1.0 / self.lammbda * adv)
         actor_loss = (log_prob * weight_term).mean() * -1
@@ -115,21 +115,21 @@ class AWAC(nn.Module):
             if isinstance(next_states,tuple):
                 next_states_l,next_states_r = next_states
                 #left nodes value func
-                qs_l = self.critic_target(next_states_l)  # [minibatch size x #.actions]
+                qs_l = self.critic1_target(next_states_l)  # [minibatch size x #.actions]
                 sampled_as_l = self.get_action(next_states_l, eval=False, num_samples=self.num_action_samples)  # [ minibatch size x #. action samples]
                 mean_qsa_l = qs_l.gather(1, sampled_as_l).mean(dim=-1, keepdims=True)  # [minibatch size x 1]
                 #right nodes value func
-                qs_r = self.critic_target(next_states_r)  # [minibatch size x #.actions]
+                qs_r = self.critic1_target(next_states_r)  # [minibatch size x #.actions]
                 sampled_as_r = self.get_action(next_states_r, eval=False, num_samples=self.num_action_samples)  # [ minibatch size x #. action samples]
                 mean_qsa_r = qs_r.gather(1, sampled_as_r).mean(dim=-1, keepdims=True)  # [minibatch size x 1]
                 q_target = rewards + self.gamma * (1 - dones) * (mean_qsa_l+mean_qsa_r)
             else:
-                qs = self.critic_target(next_states)  # [minibatch size x #.actions]
+                qs = self.critic1_target(next_states)  # [minibatch size x #.actions]
                 sampled_as = self.get_action(next_states, eval=False, num_samples=self.num_action_samples)  # [ minibatch size x #. action samples]
                 mean_qsa = qs.gather(1, sampled_as).mean(dim=-1, keepdims=True)  # [minibatch size x 1]
                 q_target = rewards + self.gamma * mean_qsa * (1 - dones)
 
-        q_val = self.critic(states).gather(1, actions.long())
+        q_val = self.critic1(states).gather(1, actions.long())
         critic_loss = ((q_val - q_target)**2).mean() 
         return critic_loss
 
@@ -163,7 +163,7 @@ class AWAC(nn.Module):
             stats['entropy'] = stats.get('entropy', 0.0) + entropy.item()
         self.actor_optimizer.step()
 
-        self.critic_optimizer.zero_grad()
+        self.critic1_optimizer.zero_grad()
         for batch in transitions:
             batch = batch.to(self.device)
             loss = torch.tensor([0.0], device=self.device)
@@ -183,13 +183,13 @@ class AWAC(nn.Module):
             critic1_loss = self.calc_q_loss(states, actions, rewards, dones, next_states)
             critic1_loss /= n_samples
             critic1_loss.backward()
-            clip_grad_norm_(self.critic.parameters(), self.clip_grad_param)
+            clip_grad_norm_(self.critic1.parameters(), self.clip_grad_param)
 
             # Update stats
             stats['critic1_loss'] = stats.get('critic1_loss', 0.0) + critic1_loss.item()
             stats['critic2_loss'] = stats.get('critic2_loss', 0.0) 
 
-        self.critic_optimizer.step()
+        self.critic1_optimizer.step()
         return stats
 
 
@@ -211,10 +211,10 @@ class AWAC(nn.Module):
         critic1_loss, critic2_loss = self.calc_q_loss(states, actions, rewards, dones, next_states)
 
         # critic 1
-        self.critic_optimizer.zero_grad()
+        self.critic1_optimizer.zero_grad()
         critic1_loss.backward()
-        clip_grad_norm_(self.critic.parameters(), self.clip_grad_param)
-        self.critic_optimizer.step()
+        clip_grad_norm_(self.critic1.parameters(), self.clip_grad_param)
+        self.critic1_optimizer.step()
 
         if self.step % self.hard_update_every == 0:
             # ----------------------- update target networks ----------------------- #

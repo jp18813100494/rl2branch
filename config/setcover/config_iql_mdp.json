@@ -15,7 +15,7 @@
 
     "max_epochs": 200,
     "save_every": 100,
-    "eval_every": 3,
+    "eval_every": 10,
     "eval_run": 32,
     "num_workers":8,
     "num_valid_seeds": 5,
