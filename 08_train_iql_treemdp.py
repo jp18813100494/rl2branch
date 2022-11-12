@@ -178,7 +178,7 @@ def train(config, args):
         logger.info(f'Epoch:0, Actor_lr:{get_lr(agent.actor_optimizer)},Critic_lr:{get_lr(agent.value_optimizer)}')
     elif config['algo_name'] == 'AWAC':
         agent = AWAC(config=config)
-        logger.info(f'Epoch:0, Actor_lr:{get_lr(agent.actor_optimizer)},Critic_lr:{get_lr(agent.critic_optimizer)}')
+        logger.info(f'Epoch:0, Actor_lr:{get_lr(agent.actor_optimizer)},Critic_lr:{get_lr(agent.critic1_optimizer)}')
     else:
         logger.info('Provide the exact algorithm name')
     agent_pool = AgentPool(agent, config['num_workers'], config['time_limit'], config["mode"])
