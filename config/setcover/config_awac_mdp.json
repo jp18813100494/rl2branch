@@ -6,7 +6,7 @@
     "actor_on_lr": 1e-6,
     "critic_on_lr": 1e-6,
     "tau": 5e-3,
-    "entropy_bonus": 1,
+    "entropy_bonus": 1e-3,
     "gamma": 1.0,
     "lammbda":3.0,
     "use_adv":true,

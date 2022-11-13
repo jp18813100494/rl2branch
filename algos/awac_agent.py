@@ -93,7 +93,7 @@ class AWAC(nn.Module):
         logits = self.actor_local(states)
         dist = Categorical(logits=logits)
         log_prob = dist.log_prob(actions.squeeze(-1)).view(-1,1)
-        entropy = dist.entropy().sum()
+        entropy = dist.entropy().mean()
         with torch.no_grad():
             if self.use_adv:
                 qs = self.critic1_target(states)  # [#. samples x # actions]
@@ -106,7 +106,7 @@ class AWAC(nn.Module):
 
             weight_term = torch.exp(1.0 / self.lammbda * adv)
         actor_loss = (log_prob * weight_term).mean() * -1
-        return actor_loss,entropy
+        return actor_loss, entropy
     
     def calc_q_loss(self, states, actions, rewards, dones, next_states):
         dones = torch.unsqueeze(dones,-1)
@@ -151,8 +151,8 @@ class AWAC(nn.Module):
             actor_loss ,entropy = self.calc_policy_loss(states, actions)
             actor_loss /= n_samples
             loss += actor_loss
-            entropy /= n_samples
-            loss += - self.config['entropy_bonus']*entropy
+            # entropy /= n_samples
+            # loss += - self.config['entropy_bonus']*entropy
 
             loss.backward()
             clip_grad_norm_(self.actor_local.parameters(), self.clip_grad_param)

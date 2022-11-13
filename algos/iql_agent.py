@@ -178,7 +178,6 @@ class IQL(nn.Module):
             loss += actor_loss
             entropy /= n_samples
             loss += - self.config['entropy_bonus']*entropy
-
             loss.backward()
             # Update stats
             stats['actor_loss'] = stats.get('actor_loss', 0.0) + actor_loss.item()
@@ -191,7 +190,7 @@ class IQL(nn.Module):
 
         for batch in transitions:
             batch = batch.to(self.device)
-            loss = torch.tensor([0.0], device=self.device)
+            # loss = torch.tensor([0.0], device=self.device)
             states = (batch.constraint_features, batch.edge_index, batch.edge_attr,batch.variable_features,batch.action_set,batch.action_set_size)
             actions = batch.action_idx.unsqueeze(1)
             rewards = batch.reward
