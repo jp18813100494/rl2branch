@@ -249,14 +249,14 @@ class AWAC(nn.Module):
             # wandb.save(models_dir +'/actor_'+ str(ep) + ".pth")
             torch.save(self.critic1.state_dict(), models_dir +'/critic1_'+ stat + str(ep) + ".pth")
             # wandb.save(models_dir +'/critic1_'+ str(ep) + ".pth")
-            torch.save(self.value_net.state_dict(), models_dir +'/value_'+ stat + str(ep) + ".pth")
+            # torch.save(self.value_net.state_dict(), models_dir +'/value_'+ stat + str(ep) + ".pth")
             # wandb.save(models_dir +'/critic1_'+ str(ep) + ".pth")
         else:
             torch.save(self.actor_local.state_dict(), models_dir +'/actor_'+ stat + "best.pth")
             # wandb.save(models_dir +'/actor_'+ "best.pth")
             torch.save(self.critic1.state_dict(), models_dir +'/critic1_'+ stat + "best.pth")
             # wandb.save(models_dir +'/critic1_'+ "best.pth")
-            torch.save(self.value_net.state_dict(), models_dir +'/value_' +stat+ "best.pth")
+            # torch.save(self.value_net.state_dict(), models_dir +'/value_' +stat+ "best.pth")
             # wandb.save(models_dir +'/value_'+ "best.pth")
 
 def loss(diff, expectile=0.8):
