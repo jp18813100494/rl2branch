@@ -32,6 +32,9 @@ def get_config():
     parser.add_argument("--tau", type=float, default=5e-3, help="")
     parser.add_argument("--entropy_bonus", type=float, default=1e-5, help="")
     parser.add_argument("--gamma", type=float, default=0.99, help="")
+    parser.add_argument("--lammbda", type=float, default=3.0, help="")
+    parser.add_argument("--num_action_samples", type=int, default=1, help="")
+    parser.add_argument("--use_adv", type=bool, default=True, help="")
     parser.add_argument("--hard_update_every", type=int, default=10, help="")
     parser.add_argument("--clip_grad_param", type=int, default=100, help="")
 

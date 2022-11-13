@@ -10,7 +10,7 @@
     "gamma": 1.0,
     "lammbda":3.0,
     "use_adv":true,
-    "num_action_samples":20,
+    "num_action_samples":1,
     "hard_update_every": 10,
     "clip_grad_param": 100,
     "max_epochs": 1000,
