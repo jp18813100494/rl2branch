@@ -17,7 +17,6 @@ from torch.multiprocessing import Process
 from datetime import datetime
 from pathlib import Path
 from scipy.stats.mstats import gmean
-from algos.iql_agent import save
 import random
 
 
@@ -476,5 +475,9 @@ def wandb_eval_log(epoch, agent, wandb, wandb_data, v_stats, v_reward, config, l
         config['best_tree_size'] = wandb_data['valid_nnodes_g']
         logger.info('Best parameters so far (1-shifted geometric mean), saving model.')
         if config['wandb']:
-            save(config, model=agent, wandb=wandb ,stat=stat)
+            agent.save( wandb=wandb ,stat=stat)
     return wandb_data
+
+def get_lr(optimizer):
+    for param_group in optimizer.param_groups:
+        return param_group['lr']

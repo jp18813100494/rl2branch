@@ -12,9 +12,9 @@ import json
 import utilities
 import glob
 import pprint
-from algos.iql_agent import IQL,save,get_lr
+from algos.iql_agent import IQL
 from algos.awac_agent import AWAC
-from utilities import BuildFullTransition
+from utilities import BuildFullTransition,get_lr
 from agent import AgentPool
 from scipy.stats.mstats import gmean
 
@@ -23,7 +23,7 @@ def get_config():
     parser.add_argument('--config', type=str, default='config/setcover/config_iql_mdp.json', help='path to yaml config file')
     parser.add_argument("--algo_name", type=str, default="IQL", help="Run name, default: IQL")
     parser.add_argument("--hidden_size", type=int, default=64, help="")
-    parser.add_argument("--actor_lr", type=float, default=3e-4, help="actor learning_rate")
+    parser.add_argument("--actor_lr", type=float, default=1e-4, help="actor learning_rate")
     parser.add_argument("--critic_lr", type=float, default=3e-4, help="critic learning_rate")
     parser.add_argument("--actor_on_lr", type=float, default=1e-6, help="actor learning_rate")
     parser.add_argument("--critic_on_lr", type=float, default=1e-6, help="critic learning_rate")
@@ -199,6 +199,8 @@ def train(config, args):
     for epoch in range(0, config['max_epochs']+1):
         logger.info(f'** Epoch {epoch}')
         wandb_data = {}
+        if epoch==5:
+            print('Stop!!!')
         # Allow preempted jobs to access policy
         if is_validation_epoch(epoch):
             v_stats, v_queue, v_access = v_stats_next, v_queue_next, v_access_next
@@ -251,7 +253,7 @@ def train(config, args):
             if config["wandb"] and wandb_data['valid_nnodes_g'] < config["best_tree_size"]:
                 config["best_tree_size"] = wandb_data['valid_nnodes_g']
                 logger.info('Best parameters so far (1-shifted geometric mean), saving model.')
-                save(config, agent, wandb, config['train_stat'])
+                agent.save(wandb, config['train_stat'])
         # Training
         if is_online_training_epoch(epoch) or is_offline_training_epoch(epoch):
             if config['train_stat'] == 'online':
@@ -271,13 +273,13 @@ def train(config, args):
                 'train_value_loss': t_losses.get('value_loss', None),
                 'actor_lr':get_lr(agent.actor_optimizer),
             })
-            logger.info(f"Episode: {epoch} | Batches: {batches} | Polciy Loss: {t_losses.get('actor_loss', None)}  | Value Loss: {t_losses.get('critic1_loss', None)} | Critic Loss: {t_losses.get('value_loss', None)} ")
+            logger.info(f"Episode: {epoch} | Batches: {batches} | Polciy Loss: {t_losses.get('actor_loss', None)}  | Critic Loss: {t_losses.get('critic1_loss', None)} | Value Loss: {t_losses.get('value_loss', 0)} ")
 
         # Send the stats to wandb
         if config['wandb']:
             wandb.log(wandb_data, step = epoch)
         if epoch % config['save_every'] == 0 and config['wandb']:
-            save(config,  model=agent, wandb=wandb, stat=config['train_stat'], ep=epoch)
+            agent.save(wandb=wandb, stat=config['train_stat'], ep=epoch)
         
         config["cur_epoch"] = epoch
         if is_validation_epoch(epoch) and config['train_stat'] == 'offline':

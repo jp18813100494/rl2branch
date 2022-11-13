@@ -282,36 +282,32 @@ class IQL(nn.Module):
         """
         for target_param, local_param in zip(target_model.parameters(), local_model.parameters()):
             target_param.data.copy_(self.tau*local_param.data + (1.0-self.tau)*target_param.data)
+    
+    def save(self, wandb, stat="offline",ep=None):
+        import os
+        models_dir = os.path.join(self.config['model_dir'],"models")
+        if not os.path.exists(models_dir):
+            os.makedirs(models_dir, exist_ok=True)
+        if not ep == None:
+            torch.save(self.actor_local.state_dict(), models_dir +'/actor_'+ stat + str(ep) + ".pth")
+            # wandb.save(models_dir +'/actor_'+ str(ep) + ".pth")
+            torch.save(self.critic1.state_dict(), models_dir +'/critic1_'+ stat + str(ep) + ".pth")
+            # wandb.save(models_dir +'/critic1_'+ str(ep) + ".pth")
+            # if model.__name__ == 'IQL':
+            torch.save(self.value_net.state_dict(), models_dir +'/value_'+ stat + str(ep) + ".pth")
+            # wandb.save(models_dir +'/critic1_'+ str(ep) + ".pth")
+        else:
+            torch.save(self.actor_local.state_dict(), models_dir +'/actor_'+ stat + "best.pth")
+            # wandb.save(models_dir +'/actor_'+ "best.pth")
+            torch.save(self.critic1.state_dict(), models_dir +'/critic1_'+ stat + "best.pth")
+            # wandb.save(models_dir +'/critic1_'+ "best.pth")
+            # if model.__name__ == 'IQL':
+            torch.save(self.value_net.state_dict(), models_dir +'/value_' +stat+ "best.pth")
+            # wandb.save(models_dir +'/value_'+ "best.pth")
 
 def loss(diff, expectile=0.8):
     weight = torch.where(diff > 0, expectile, (1 - expectile))
     return weight * (diff**2)
-
-def save(config, model, wandb, stat="offline",ep=None):
-    import os
-    models_dir = os.path.join(config['model_dir'],"models")
-    if not os.path.exists(models_dir):
-        os.makedirs(models_dir, exist_ok=True)
-    if not ep == None:
-        torch.save(model.actor_local.state_dict(), models_dir +'/actor_'+ stat + str(ep) + ".pth")
-        # wandb.save(models_dir +'/actor_'+ str(ep) + ".pth")
-        torch.save(model.critic1.state_dict(), models_dir +'/critic1_'+ stat + str(ep) + ".pth")
-        # wandb.save(models_dir +'/critic1_'+ str(ep) + ".pth")
-        if model.__name__ == 'IQL':
-            torch.save(model.value_net.state_dict(), models_dir +'/value_'+ stat + str(ep) + ".pth")
-        # wandb.save(models_dir +'/critic1_'+ str(ep) + ".pth")
-    else:
-        torch.save(model.actor_local.state_dict(), models_dir +'/actor_'+ stat + "best.pth")
-        # wandb.save(models_dir +'/actor_'+ "best.pth")
-        torch.save(model.critic1.state_dict(), models_dir +'/critic1_'+ stat + "best.pth")
-        # wandb.save(models_dir +'/critic1_'+ "best.pth")
-        if model.__name__ == 'IQL':
-            torch.save(model.value_net.state_dict(), models_dir +'/value_' +stat+ "best.pth")
-        # wandb.save(models_dir +'/value_'+ "best.pth")
-
-def get_lr(optimizer):
-    for param_group in optimizer.param_groups:
-        return param_group['lr']
 
 class Scheduler(torch.optim.lr_scheduler.ReduceLROnPlateau):
     def __init__(self, optimizer, **kwargs):
