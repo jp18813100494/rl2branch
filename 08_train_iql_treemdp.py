@@ -31,9 +31,10 @@ def get_config():
     parser.add_argument("--expectile", type=float, default=0.7, help="")
     parser.add_argument("--tau", type=float, default=5e-3, help="")
     parser.add_argument("--entropy_bonus", type=float, default=1e-5, help="")
+    parser.add_argument("--entropy_bonus_on", type=float, default=1e-5, help="")
     parser.add_argument("--gamma", type=float, default=0.99, help="")
     parser.add_argument("--lammbda", type=float, default=3.0, help="")
-    parser.add_argument("--num_action_samples", type=int, default=1, help="")
+    parser.add_argument("--num_action_samples", type=int, default=5, help="")
     parser.add_argument("--use_adv", type=bool, default=True, help="")
     parser.add_argument("--hard_update_every", type=int, default=10, help="")
     parser.add_argument("--clip_grad_param", type=int, default=100, help="")
@@ -297,6 +298,7 @@ def train(config, args):
                 config['train_stat'] = 'online'
                 logger.info(f'Start online training')
                 agent.reset_optimizer()
+                agent.config['entropy_bonus'] = config["entropy_bonus_on"]
                 train_batch = next(train_batches)
                 t_samples_next, t_stats_next, t_queue_next, t_access_next = agent_pool.start_job(train_batch, sample_rate=config['sample_rate'], greedy=False, block_policy=True)
                 # else:
