@@ -159,6 +159,7 @@ class IQL(nn.Module):
 
         self.value_optimizer.zero_grad()
         for batch in transitions:
+            self.step += 1
             batch = batch.to(self.device)
             states = (batch.constraint_features, batch.edge_index, batch.edge_attr,batch.variable_features,batch.action_set,batch.action_set_size)
             actions = batch.action_idx.unsqueeze(1)
@@ -219,6 +220,12 @@ class IQL(nn.Module):
 
         self.critic1_optimizer.step()
         self.critic2_optimizer.step()
+
+        if self.step % self.hard_update_every == 0:
+            # ----------------------- update target networks ----------------------- #
+            self.hard_update(self.critic1, self.critic1_target)
+            self.hard_update(self.critic2, self.critic2_target)
+        
         return stats
 
 
