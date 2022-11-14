@@ -54,8 +54,10 @@ class IQL(nn.Module):
         self.critic2_scheduler = Scheduler(self.critic2_optimizer, mode='min', patience=5, factor=0.2, verbose=True)
         self.value_scheduler = Scheduler(self.value_optimizer, mode='min', patience=5, factor=0.2, verbose=True)
         
-        # All moduls : ('cons_embedding','edge_embedding','var_embedding','conv_v_to_c','conv_c_to_v','output_module')   
-        self.freeze_layers = ('cons_embedding','edge_embedding','var_embedding')
+        full_layers = ['cons_embedding','edge_embedding','var_embedding','conv_v_to_c','conv_c_to_v','output_module']
+        self.freeze_layers = []
+        for i in range(self.config['pretrain_module_nums']):
+            self.freeze_layers.append(full_layers[i])
 
     def scheduler_step(self,metric):
         self.actor_scheduler.step(metric)
@@ -87,10 +89,11 @@ class IQL(nn.Module):
                 logits_end = batch.action_set_size.cumsum(-1)
                 logits_start = logits_end - batch.action_set_size
                 for start, end, greedy in zip(logits_start, logits_end, greedy):
-                    if greedy:
-                        action_idx = logits[start:end].argmax()
-                    else:
-                        action_idx = torch.distributions.categorical.Categorical(logits=logits[start:end]).sample()
+                    action_idx = logits[start:end].argmax()
+                    # if greedy:
+                    #     action_idx = logits[start:end].argmax()
+                    # else:
+                    #     action_idx = torch.distributions.categorical.Categorical(logits=logits[start:end]).sample()
                     action_idxs.append(action_idx.item())
 
         return action_idxs
@@ -190,7 +193,6 @@ class IQL(nn.Module):
 
         self.critic1_optimizer.zero_grad()
         self.critic2_optimizer.zero_grad()
-
         for batch in transitions:
             batch = batch.to(self.device)
             states = (batch.constraint_features, batch.edge_index, batch.edge_attr,batch.variable_features,batch.action_set,batch.action_set_size)
@@ -225,7 +227,6 @@ class IQL(nn.Module):
             # ----------------------- update target networks ----------------------- #
             self.hard_update(self.critic1, self.critic1_target)
             self.hard_update(self.critic2, self.critic2_target)
-        
         return stats
 
 

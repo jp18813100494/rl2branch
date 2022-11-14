@@ -2,6 +2,7 @@
     "algo_name": "IQL",
     "model_path": "none",
     "load_pretrain": false,
+    "pretrain_module_nums":3,
     "hidden_size": 64,
     "actor_lr": 3e-4,
     "critic_lr": 3e-4,
