@@ -1,4 +1,5 @@
 from re import M
+from numpy import dtype
 import torch
 import torch_geometric
 import torch.optim as optim
@@ -80,14 +81,26 @@ class AWAC(nn.Module):
 
     def get_action(self, state, eval=False,num_samples=1):
         """Returns actions for given state as per current policy."""
-        if num_samples==1:
-            state = state.to(self.device)
+        # if num_samples==1:
+        #     state = state.to(self.device)
+        # with torch.no_grad():
+        #     action = self.actor_local.get_action(state, eval, num_samples)
+        # if num_samples == 1:    
+        #     return action.detach().cpu()
+        # else:
+        #     return action
         with torch.no_grad():
-            action = self.actor_local.get_action(state, eval, num_samples)
-        if num_samples == 1:    
-            return action.detach().cpu()
+            action_logits = self.actor_local(state,eval)
+        if num_samples == 1:
+            action_idxs = []
+            for  idx in range(action_logits.shape[0]):
+                action_idx = action_logits[idx].argmax()
+                action_idxs.append(action_idx)
+            action_idxs = torch.tensor(action_idxs, dtype=torch.int64).reshape(-1,1).to(self.device)
         else:
-            return action
+            dist = Categorical(logits=action_logits)
+            action_idxs = dist.sample(sample_shape=[num_samples]).T
+        return action_idxs
 
     def calc_policy_loss(self, states, actions):
         logits = self.actor_local(states)

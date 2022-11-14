@@ -15,11 +15,11 @@ class IQL(nn.Module):
         self.actor_lr = config["actor_lr"]
         self.critic_lr = config["critic_lr"]
         self.tau = config["tau"]
-        self.gamma = torch.FloatTensor([config["gamma"]]).to(self.device)
+        self.gamma = config["gamma"]
         self.hard_update_every = config["hard_update_every"]
         self.clip_grad_param = config["clip_grad_param"]
-        self.temperature = torch.FloatTensor([config["temperature"]]).to(self.device)
-        self.expectile = torch.FloatTensor([config["expectile"]]).to(self.device)
+        self.temperature = config["temperature"]
+        self.expectile = config["expectile"]
         self.seed=config["seed"]
         self.actor_on_lr = config["actor_on_lr"]
         self.critic_on_lr = config["critic_on_lr"]
@@ -54,6 +54,8 @@ class IQL(nn.Module):
         self.critic2_scheduler = Scheduler(self.critic2_optimizer, mode='min', patience=5, factor=0.2, verbose=True)
         self.value_scheduler = Scheduler(self.value_optimizer, mode='min', patience=5, factor=0.2, verbose=True)
         
+        # All moduls : ('cons_embedding','edge_embedding','var_embedding','conv_v_to_c','conv_c_to_v','output_module')   
+        self.freeze_layers = ('cons_embedding','edge_embedding','var_embedding')
 
     def scheduler_step(self,metric):
         self.actor_scheduler.step(metric)
@@ -190,7 +192,6 @@ class IQL(nn.Module):
 
         for batch in transitions:
             batch = batch.to(self.device)
-            # loss = torch.tensor([0.0], device=self.device)
             states = (batch.constraint_features, batch.edge_index, batch.edge_attr,batch.variable_features,batch.action_set,batch.action_set_size)
             actions = batch.action_idx.unsqueeze(1)
             rewards = batch.reward
@@ -291,18 +292,44 @@ class IQL(nn.Module):
             torch.save(self.actor_local.state_dict(), models_dir +'/actor_'+ stat + str(ep) + ".pth")
             # wandb.save(models_dir +'/actor_'+ str(ep) + ".pth")
             torch.save(self.critic1.state_dict(), models_dir +'/critic1_'+ stat + str(ep) + ".pth")
+            torch.save(self.critic2.state_dict(), models_dir +'/critic2_'+ stat + str(ep) + ".pth")
             # wandb.save(models_dir +'/critic1_'+ str(ep) + ".pth")
-            # if model.__name__ == 'IQL':
             torch.save(self.value_net.state_dict(), models_dir +'/value_'+ stat + str(ep) + ".pth")
             # wandb.save(models_dir +'/critic1_'+ str(ep) + ".pth")
         else:
             torch.save(self.actor_local.state_dict(), models_dir +'/actor_'+ stat + "best.pth")
             # wandb.save(models_dir +'/actor_'+ "best.pth")
             torch.save(self.critic1.state_dict(), models_dir +'/critic1_'+ stat + "best.pth")
+            torch.save(self.critic2.state_dict(), models_dir +'/critic2_'+ stat + "best.pth")
             # wandb.save(models_dir +'/critic1_'+ "best.pth")
-            # if model.__name__ == 'IQL':
             torch.save(self.value_net.state_dict(), models_dir +'/value_' +stat+ "best.pth")
             # wandb.save(models_dir +'/value_'+ "best.pth")
+    
+    def load_model(self,path):
+        self.actor_local.load_state_dict(torch.load(path+'/actor_offlinebest.pth'))
+        self.critic1.load_state_dict(torch.load(path+'/critic1_offlinebest.pth'))
+        # self.critic2.load_state_dict(torch.load(path+'/critic1_offline90.pth'))
+        self.critic2.load_state_dict(torch.load(path+'/critic2_offlinebest.pth'))
+        self.value_net.load_state_dict(torch.load(path+'/value_offlinebest.pth'))
+
+    def freeze_layer(self, model):
+        for name,param in model.named_parameters():
+            # print(name,param.shape)
+            if name.split(".")[0] in self.freeze_layers:
+                param.require_gard = False
+
+    def freeze_part_model(self):
+        self.freeze_layer(self.actor_local)
+        self.freeze_layer(self.critic1)
+        self.freeze_layer(self.critic2)
+        self.freeze_layer(self.value_net)
+
+    def switch_to_online(self):
+        self.freeze_part_model()
+        self.config['train_stat'] = 'online'
+        self.reset_optimizer()
+        self.config['entropy_bonus'] = self.config["entropy_bonus_on"]
+
 
 def loss(diff, expectile=0.8):
     weight = torch.where(diff > 0, expectile, (1 - expectile))

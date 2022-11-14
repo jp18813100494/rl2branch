@@ -22,17 +22,19 @@ def get_config():
     parser = argparse.ArgumentParser(description='RL')
     parser.add_argument('--config', type=str, default='config/setcover/config_iql_mdp.json', help='path to yaml config file')
     parser.add_argument("--algo_name", type=str, default="IQL", help="Run name, default: IQL")
+    parser.add_argument('--model_path', type=str, default='IQL-tmdp+DFS-cauctions-2022-11-13_22-51-04', help='path for pretrained model')
+    parser.add_argument('--load_pretrain', type=bool, default=False, help='')
     parser.add_argument("--hidden_size", type=int, default=64, help="")
-    parser.add_argument("--actor_lr", type=float, default=1e-4, help="actor learning_rate")
+    parser.add_argument("--actor_lr", type=float, default=3e-4, help="actor learning_rate")
     parser.add_argument("--critic_lr", type=float, default=3e-4, help="critic learning_rate")
-    parser.add_argument("--actor_on_lr", type=float, default=1e-6, help="actor learning_rate")
-    parser.add_argument("--critic_on_lr", type=float, default=1e-6, help="critic learning_rate")
+    parser.add_argument("--actor_on_lr", type=float, default=1e-5, help="actor learning_rate")
+    parser.add_argument("--critic_on_lr", type=float, default=1e-5, help="critic learning_rate")
     parser.add_argument("--temperature", type=float, default=3, help="")
     parser.add_argument("--expectile", type=float, default=0.7, help="")
     parser.add_argument("--tau", type=float, default=5e-3, help="")
     parser.add_argument("--entropy_bonus", type=float, default=1e-5, help="")
     parser.add_argument("--entropy_bonus_on", type=float, default=1e-5, help="")
-    parser.add_argument("--gamma", type=float, default=0.99, help="")
+    parser.add_argument("--gamma", type=float, default=1.0, help="")
     parser.add_argument("--lammbda", type=float, default=3.0, help="")
     parser.add_argument("--num_action_samples", type=int, default=5, help="")
     parser.add_argument("--use_adv", type=bool, default=True, help="")
@@ -125,6 +127,8 @@ def get_config():
     model_dir = osp.realpath(osp.join('results', token))
     config['model_dir'] = model_dir
     config['cur_name'] = cur_name
+    if config['load_pretrain']:
+        config['pretrained_model_path'] = 'results/'+config['problem']+'/'+config['model_path']+'/models'
 
     problem_folders = {
         'setcover': 'setcover/400r_750c_0.05d',
@@ -185,6 +189,13 @@ def train(config, args):
         logger.info(f'Epoch:0, Actor_lr:{get_lr(agent.actor_optimizer)},Critic_lr:{get_lr(agent.critic1_optimizer)}')
     else:
         logger.info('Provide the exact algorithm name')
+    # load pretrained model
+    if config['load_pretrain']:
+        # config['pretrained_model_path'] = 'results/'+config['problem']+'/'+config['model_path']+'/models'
+        agent.load_model(config['pretrained_model_path'])
+        logger.info('Loading pretrained model, switch to online training')
+        agent.switch_to_online()
+
     agent_pool = AgentPool(agent, config['num_workers'], config['time_limit'], config["mode"])
     agent_pool.start()
     
@@ -294,11 +305,11 @@ def train(config, args):
                 logger.info(f"5 epochs without improvement, decreasing learning rate")
             elif agent.actor_scheduler.num_bad_epochs == 10:
                 logger.info(f"Offline: 10 epochs without improvement, switch to online")
-                logger.info(f'Offline for {epoch} epochs')
-                config['train_stat'] = 'online'
+                logger.info(f'Offline end at {epoch} epochs')
                 logger.info(f'Start online training')
-                agent.reset_optimizer()
-                agent.config['entropy_bonus'] = config["entropy_bonus_on"]
+                agent.switch_to_online()
+                # agent.reset_optimizer()
+                # agent.config['entropy_bonus'] = config["entropy_bonus_on"]
                 train_batch = next(train_batches)
                 t_samples_next, t_stats_next, t_queue_next, t_access_next = agent_pool.start_job(train_batch, sample_rate=config['sample_rate'], greedy=False, block_policy=True)
                 # else:
