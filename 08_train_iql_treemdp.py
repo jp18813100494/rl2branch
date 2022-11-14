@@ -74,7 +74,7 @@ def get_config():
     args_config = {key: getattr(args, key) for key in config.keys() & vars(args).keys()}
     config.update(args_config)
 
-    config['hard_update_every'] = int(np.floor(config['num_train_samples']/config['batch_size']))
+    config['hard_update_every'] = 5*int(np.floor(config['num_train_samples']/config['batch_size']))
     ### Device SETUP ###
     if config['gpu'] == -1:
         os.environ['CUDA_VISIBLE_DEVICES'] = ''
