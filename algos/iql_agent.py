@@ -89,11 +89,11 @@ class IQL(nn.Module):
                 logits_end = batch.action_set_size.cumsum(-1)
                 logits_start = logits_end - batch.action_set_size
                 for start, end, greedy in zip(logits_start, logits_end, greedy):
-                    action_idx = logits[start:end].argmax()
-                    # if greedy:
-                    #     action_idx = logits[start:end].argmax()
-                    # else:
-                    #     action_idx = torch.distributions.categorical.Categorical(logits=logits[start:end]).sample()
+                    # action_idx = logits[start:end].argmax()
+                    if greedy:
+                        action_idx = logits[start:end].argmax()
+                    else:
+                        action_idx = torch.distributions.categorical.Categorical(logits=logits[start:end]).sample()
                     action_idxs.append(action_idx.item())
 
         return action_idxs
@@ -179,7 +179,7 @@ class IQL(nn.Module):
             loss = torch.tensor([0.0], device=self.device)
             states = (batch.constraint_features, batch.edge_index, batch.edge_attr,batch.variable_features,batch.action_set,batch.action_set_size)
             actions = batch.action_idx.unsqueeze(1)
-            actor_loss ,entropy = self.calc_policy_loss(states, actions)
+            actor_loss,entropy = self.calc_policy_loss(states, actions)
             actor_loss /= n_samples
             loss += actor_loss
             entropy /= n_samples
