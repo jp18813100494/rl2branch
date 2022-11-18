@@ -12,10 +12,11 @@ import json
 import utilities
 import glob
 import pprint
+import ecole
 from algos.iql_agent import IQL
 from algos.awac_agent import AWAC
 from utilities import BuildFullTransition,get_lr
-from agent import AgentPool
+from agent_retro import AgentPool
 from scipy.stats.mstats import gmean
 
 def get_config():
@@ -164,22 +165,28 @@ def train(config, args):
     train_files = [str(file) for file in (pathlib.Path(f'data/samples_{args.mode}')/config['problem_folder']/'train').glob('sample_*.pkl')]
     valid_path = config['valid_path']
     train_path = config['train_path']
-    valid_instances = [f'{valid_path}/instance_{j+1}.lp' for j in range(config['num_valid_instances'])]
-    train_instances = [f'{train_path}/instance_{j+1}.lp' for j in range(len(glob.glob(f'{train_path}/instance_*.lp')))]
-    valid_batch = [{'path': instance, 'seed': seed} for instance in valid_instances for seed in range(config['num_valid_seeds'])]
+    valid_instances = ecole.instance.FileGenerator(valid_path)
+    train_instances = ecole.instance.FileGenerator(train_path)
+    valid_batch = []
+    for  j in range(config['num_valid_instances']):
+        instance = next(valid_instances)
+        for seed in range(config['num_valid_seeds']):
+            valid_batch.append({'path': instance, 'seed': seed})
+
     # collect the pre-computed optimal solutions for the training instances
     with open(f"{config['train_path']}/instance_solutions.json", "r") as f:
         train_sols = json.load(f)
-    with open(f"{config['valid_path']}/instance_solutions.json", "r") as f:
-        valid_sols = json.load(f)
     eps = config["eps"] = -0.1 if config['maximization'] else 0.1
 
     def train_batch_generator():
         while True:
-            yield [{'path': instance, 'sol': train_sols[instance] + eps, 'seed': rng.randint(0, 2**32)}
-                    for instance in rng.choice(train_instances, size=config['num_episodes_per_epoch'], replace=True)]
+            train_batch = []
+            for i in range(config['num_episodes_per_epoch']):
+                instance = next(train_instances)
+                train_batch.append({'path': instance, 'seed': rng.randint(0, 2**32)})
+            yield train_batch
     train_batches = train_batch_generator()
-    logger.info(f"Training on {len(train_files)} training instances and {len(valid_instances)} validation instances")
+    # logger.info(f"Training on {len(train_files)} training instances and {len(valid_instances)} validation instances")
 
     batches = 0
     if config['algo_name'] == 'IQL':
@@ -192,7 +199,6 @@ def train(config, args):
         logger.info('Provide the exact algorithm name')
     # load pretrained model
     if config['load_pretrain']:
-        # config['pretrained_model_path'] = 'results/'+config['problem']+'/'+config['model_path']+'/models'
         agent.load_model(config['pretrained_model_path'])
         logger.info('Loading pretrained model, switch to online training')
         agent.switch_to_online()
@@ -215,8 +221,8 @@ def train(config, args):
     for epoch in range(0, config['max_epochs']+1):
         logger.info(f'** Epoch {epoch}')
         wandb_data = {}
-        if epoch==5:
-            print('Stop!!!')
+        # if epoch==5:
+        #     print('Stop!!!')
         # Allow preempted jobs to access policy
         if is_validation_epoch(epoch):
             v_stats, v_queue, v_access = v_stats_next, v_queue_next, v_access_next
@@ -305,7 +311,6 @@ def train(config, args):
             elif agent.actor_scheduler.num_bad_epochs == 5:
                 logger.info(f"5 epochs without improvement, decreasing learning rate")
             elif agent.actor_scheduler.num_bad_epochs == 10:
-                break
                 logger.info(f"Offline: 10 epochs without improvement, switch to online")
                 logger.info(f'Offline end at {epoch} epochs')
                 logger.info(f'Start online training')

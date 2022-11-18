@@ -4,7 +4,7 @@ import queue
 import utilities
 import numpy as np
 from collections import namedtuple
-
+from utilities import RetroBranching
 
 class AgentPool():
     """
@@ -152,12 +152,18 @@ class Agent(threading.Thread):
                                        observation_function=observation_function,
                                        reward_function=reward_function,
                                        information_function=information_function)
-        elif mode == 'mdp' or mode=='retro' or mode=='retro2':
+        elif mode == 'mdp':
             self.env = MDPBranchingEnv(scip_params=scip_params,
                                        pseudo_candidates=False,
                                        observation_function=observation_function,
                                        reward_function=reward_function,
                                        information_function=information_function)
+        elif mode == 'retro' or mode == 'retro2':
+            self.env = ecole.environment.Branching(scip_params=scip_params,
+                                       observation_function=observation_function,
+                                       reward_function=reward_function,
+                                       information_function=information_function)
+        
         else:
             raise NotImplementedError
 
@@ -180,48 +186,52 @@ class Agent(threading.Thread):
             stats = task['stats']
             policy_access = task['policy_access']
             seed = instance['seed']
+            instance = instance['path']
 
             transitions = []
-            datas = dict()
+            # initialise custom reward object
+            custom_reward = RetroBranching(debug_mode=False)
+            # initialise an instance which is not pre-solved by SCIP
             self.env.seed(seed)
-            rng = np.random.RandomState(seed)
-            if sample_rate > 0:
-                tree_recorder = TreeRecorder()
+            custom_reward.before_reset(instance)
+            obs, action_set, reward, done, info = self.env.reset(instance)
+            _custom_reward = custom_reward.extract(self.env.model, done)
 
-            # Run episode
-            observation, action_set, reward, done, info = self.env.reset(instance = instance['path'],
-                                                                             primal_bound=instance.get('sol', None),
-                                                                             training=training)
+            # # Run episode
             policy_access.wait()
             iter_count = 0
+            prev_obs = obs
+            if not done:
+                focus_node_obs,node_observation = obs
+                pre_state = utilities.extract_state(node_observation, action_set, focus_node_obs.number)
+            original_transitions = []
             while not done:
-                focus_node_obs, node_bipartite_obs = observation
-                cum_nnodes, cur_nnodes = reward['cum_nnodes'],reward['cur_nnodes']
-                state = utilities.extract_state(node_bipartite_obs, action_set, focus_node_obs.number)
-
-                # send out policy queries
-                self.policy_queries_queue.put({'state': state, 'greedy': greedy, 'receiver': self.policy_answers_queue})
+                 # send out policy queries
+                self.policy_queries_queue.put({'state': pre_state, 'greedy': greedy, 'receiver': self.policy_answers_queue})
                 action_idx = self.policy_answers_queue.get()
                 action = action_set[action_idx]
+                obs, action_set, reward, done, info = self.env.step(action)
+                _custom_reward = custom_reward.extract(self.env.model, done)
 
-                # collect transition samples if requested --part 1
+                if done:
+                    obs = prev_obs
+                    state = pre_state
+                else:
+                    focus_node_obs,node_observation = obs
+                    state = utilities.extract_state(node_observation, action_set, focus_node_obs.number)
                 if sample_rate > 0:
-                    tree_recorder.record_branching_decision(focus_node_obs)
-                    keep_sample = rng.rand() < sample_rate
-                    if keep_sample:
-                        datas[focus_node_obs.number] ={
-                                    "state":state,
-                                    'action':action,
-                                    'action_idx':action_idx,
-                                    'cum_nnodes':cum_nnodes,
-                                    'returns':None,
-                                    'reward':None,
-                                    'next_state':[None,None],
-                                    'done':done
-                                }
-                observation, action_set, cum_nnodes, done, info = self.env.step(action)
-
+                    original_transitions.append({'obs': prev_obs,
+                                            'state': pre_state,
+                                            'action': action,
+                                            'action_idx': action_idx,
+                                            'reward': None,
+                                            'done': done,
+                                            'next_obs': obs,
+                                            'next_state': state}) 
                 iter_count += 1
+                # update prev obs
+                prev_obs = obs
+                pre_state = state
                 if (iter_count>50000) and training: done=True # avoid too large trees during training for stability
 
             if (iter_count>50000) and training: # avoid too large trees during training for stability
@@ -230,21 +240,21 @@ class Agent(threading.Thread):
                 continue
 
             # post-process the collected samples (credit assignment)
-            if datas:
-                if sample_rate>0:
-                    datas = tree_recorder.calculate_subtree_sizes_next_state(datas,self.mode)
-                    for value in datas.values():
-                        state = value['state']
-                        action = value['action']
-                        action_idx = value['action_idx']
-                        cum_nnodes = value['cum_nnodes']
-                        reward = value['reward']
-                        next_state = value['next_state']
-                        done = value['done']
-                        if next_state[0] is None and next_state[1] is None:
-                            continue
-                        transition = utilities.FullTransition(state, action, action_idx, reward, done, next_state, cum_nnodes)
+            if sample_rate > 0 and _custom_reward:
+                for retro_traj in _custom_reward:
+                    t = 0
+                    path_nodes = list(retro_traj.keys())
+                    for step_idx, reward in retro_traj.items():
+                        transition = original_transitions[step_idx]
+                        transition['reward'] = reward
+                        if self.mode == 'retro':
+                            if t < len(path_nodes)-1:
+                                transition['next_state'] = original_transitions[path_nodes[t+1]]['state']
+                            else:
+                                transition['next_state'] = transition['state']
+                        transition = utilities.FullTransition(transition['state'], transition['action'], transition['action_idx'], transition['reward'], transition['done'], transition['next_state'], 0)
                         transitions.append(transition)
+                        t += 1
 
             # record episode samples and stats
             samples.extend(transitions)
@@ -253,103 +263,6 @@ class Agent(threading.Thread):
             # tell both the agent pool and the original task sponsor that the task is done
             job_sponsor.task_done()
             self.jobs_queue.task_done()
-
-    # def run(self):
-    #     while True:
-    #         job_sponsor = self.jobs_queue.get()
-
-    #         # check for a stopping order
-    #         if job_sponsor is None:
-    #             self.jobs_queue.task_done()
-    #             break
-
-    #         # Get task from job sponsor
-    #         task = job_sponsor.get()
-    #         instance = task['instance']
-    #         sample_rate = task['sample_rate']
-    #         greedy = task['greedy'] # should actions be chosen greedily w.r.t. the policy?
-    #         training = not greedy
-    #         samples = task['samples']
-    #         stats = task['stats']
-    #         policy_access = task['policy_access']
-    #         seed = instance['seed']
-
-    #         if not greedy:
-    #             print('training')
-    #         transitions = []
-    #         self.env.seed(seed)
-    #         rng = np.random.RandomState(seed)
-    #         if sample_rate > 0:
-    #             tree_recorder = TreeRecorder()
-
-    #         # Run episode
-    #         observation, action_set, reward, done, info = self.env.reset(instance = instance['path'],
-    #                                                                          primal_bound=instance.get('sol', None),
-    #                                                                          training=training)
-    #         policy_access.wait()
-    #         iter_count = 0
-    #         while not done:
-    #             focus_node_obs, node_bipartite_obs = observation
-    #             cum_nnodes, cur_nnodes = reward['cum_nnodes'],reward['cur_nnodes']
-    #             state = utilities.extract_state(node_bipartite_obs, action_set, focus_node_obs.number)
-
-    #             # send out policy queries
-    #             self.policy_queries_queue.put({'state': state, 'greedy': greedy, 'receiver': self.policy_answers_queue})
-    #             action_idx = self.policy_answers_queue.get()
-    #             action = action_set[action_idx]
-
-    #             # collect transition samples if requested --part 1
-    #             # if sample_rate > 0:
-    #             #     tree_recorder.record_branching_decision(focus_node_obs)
-    #             #     keep_sample = rng.rand() < sample_rate
-    #             #     if keep_sample:
-    #             #         transition = utilities.Transition(state, action_idx, cum_nnodes)
-    #             #         transitions.append(transition)
-    #             # observation, action_set, cum_nnodes, done, info = self.env.step(action)
-
-    #             # collect transition samples if requested --part 2
-    #             observation_n, action_set_n, reward_n, done, info = self.env.step(action)
-    #             if done:
-    #                 break
-    #             else:
-    #                 focus_node_obs_n, node_bipartite_obs_n = observation_n
-    #                 cum_nnodes_n, cur_nnodes_n = reward_n['cum_nnodes'],reward_n['cur_nnodes']
-    #                 next_state= utilities.extract_state(node_bipartite_obs_n, action_set_n, focus_node_obs_n.number)
-    #                 if sample_rate > 0:
-    #                     tree_recorder.record_branching_decision(focus_node_obs)
-    #                     keep_sample = rng.rand() < sample_rate
-    #                     if keep_sample:
-    #                         transition = utilities.FullTransition(state, action, action_idx, None, cur_nnodes_n, done,  next_state, cum_nnodes)
-    #                         transitions.append(transition)
-
-    #             observation, action_set, reward = observation_n, action_set_n, reward_n
-
-    #             iter_count += 1
-    #             if (iter_count>50000) and training: done=True # avoid too large trees during training for stability
-
-    #         if (iter_count>50000) and training: # avoid too large trees during training for stability
-    #             job_sponsor.task_done()
-    #             self.jobs_queue.task_done()
-    #             continue
-
-    #         # post-process the collected samples (credit assignment)
-    #         if sample_rate > 0:
-    #             if self.mode in ['tmdp+ObjLim', 'tmdp+DFS']:
-    #                 subtree_sizes = tree_recorder.calculate_subtree_sizes()
-    #                 for transition in transitions:
-    #                     transition.returns = -subtree_sizes[transition.node_id] - 1
-    #             else:
-    #                 assert self.mode == 'mdp'
-    #                 for transition in transitions:
-    #                     transition.returns = transition.cum_nnodes - cum_nnodes
-
-    #         # record episode samples and stats
-    #         samples.extend(transitions)
-    #         stats.append({'order': task, 'info': info})
-
-    #         # tell both the agent pool and the original task sponsor that the task is done
-    #         job_sponsor.task_done()
-    #         self.jobs_queue.task_done()
 
 
 class TreeRecorder:

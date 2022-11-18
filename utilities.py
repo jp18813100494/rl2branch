@@ -18,7 +18,9 @@ from datetime import datetime
 from pathlib import Path
 from scipy.stats.mstats import gmean
 import random
-
+from networkx.algorithms.shortest_paths.generic import shortest_path
+from networkx.algorithms.traversal.depth_first_search import dfs_tree
+from retro_branching.utils import SearchTree, seed_stochastic_modules_globally
 
 
 def log(str, logfile=None):
@@ -185,7 +187,7 @@ def BuildFullTransition(data_files):
         if len(sample['data'])==7:
             state, action, action_idx, _, reward, done, next_state = sample['data']
         else:
-            state, action, action_idx, _, reward, done, info, next_state = sample['data']
+            state, action, action_idx,  reward, done,  next_state = sample['data']
         if isinstance(next_state,list):
             if next_state[0] is None and next_state[1] is None:
                 continue
@@ -481,3 +483,237 @@ def wandb_eval_log(epoch, agent, wandb, wandb_data, v_stats, v_reward, config, l
 def get_lr(optimizer):
     for param_group in optimizer.param_groups:
         return param_group['lr']
+
+class RetroBranching:
+    def __init__(self, 
+                 retro_trajectory_construction='max_leaf_lp_gain',
+                 use_retro_trajectories=True,
+                 only_use_leaves_closed_by_brancher_as_terminal_nodes=True,
+                 debug_mode=False):
+        '''
+        Waits until end of episode to calculate rewards for each step, then retrospectively
+        goes back through each step in the episode and calculates reward for that step.
+        I.e. reward returned will be None until the end of the episode, at which
+        point a dict mapping episode_step_idx for optimal path nodes to reward will be returned.
+        
+        Args:
+            retro_trajectory_construction ('random', 'deepest', 'shortest', 'max_lp_gain', 'min_lp_gain', 'max_leaf_lp_gain', 
+                'reverse_visitation_order', 'visitation_order'): Which policy to use when choosing a leaf node as the final 
+                node to construct a retrospective trajectory.
+            use_retro_trajectories (bool): If False, will return original dict mapping before forming retrospective episodes.
+            only_use_leaves_closed_by_brancher_as_terminal_nodes (bool): If True, when constructing retrospective trajectories,
+                will only consider leaves which were fathomed by the brancher as the last transition for a retrospective trajectory.
+        '''
+        self.retro_trajectory_construction = retro_trajectory_construction
+        self.use_retro_trajectories = use_retro_trajectories
+        self.only_use_leaves_closed_by_brancher_as_terminal_nodes = only_use_leaves_closed_by_brancher_as_terminal_nodes
+        self.debug_mode = debug_mode
+
+    def before_reset(self, model):
+        self.started = False
+        
+    def get_path_node_scores(self, tree, path):
+        # use original node score as score for each node
+        return [tree.nodes[node]['score'] for node in path]
+
+    def conv_path_to_step_idx_reward_map(self, path):        
+        # register which nodes have been directly included in the sub-tree
+        for node in path:
+            self.nodes_added.add(node)
+        
+        # get rewards at each step in sub-tree episode
+        path_node_rewards = self.get_path_node_scores(self.tree.tree, path)
+
+        # get episode step indices at which each node in sub-tree was visited
+        path_to_step_idx = {node: self.visited_nodes_to_step_idx[node] for node in path}
+
+        # map each path node episode step idx to its corresponding reward
+        step_idx_to_reward = {step_idx: r for step_idx, r in zip(list(path_to_step_idx.values()), path_node_rewards)}
+        
+        return step_idx_to_reward
+
+
+    def _select_path_in_subtree(self, subtree):
+        for root_node in subtree.nodes:
+            if subtree.in_degree(root_node) == 0:
+                # node is root
+                break
+
+        # use a construction method to select a sub-tree episode path through the sub-tree
+        if self.retro_trajectory_construction == 'max_lp_gain' or self.retro_trajectory_construction == 'min_lp_gain':
+            # iteratively decide next node in path at each step
+            curr_node, path = root_node, [root_node]
+            while True:
+                # get potential next node(s)
+                children = [child for child in subtree.successors(curr_node)]
+                if len(children) == 0:
+                    # curr node is final leaf node, path complete
+                    break
+                else:
+                    # select next node
+                    if self.retro_trajectory_construction == 'max_lp_gain':
+                        idx = np.argmax([subtree.nodes[child]['lower_bound'] for child in children])
+                    elif self.retro_trajectory_construction == 'min_lp_gain':
+                        idx = np.argmin([subtree.nodes[child]['lower_bound'] for child in children])
+                    else:
+                        raise Exception(f'Unrecognised retro_trajectory_construction {self.retro_trajectory_construction}')
+                    curr_node = children[idx]
+                    path.append(curr_node)
+        else:
+            # first get leaf nodes and then use construction method to select leaf target for shortest path
+            if self.only_use_leaves_closed_by_brancher_as_terminal_nodes:
+                leaf_nodes = [node for node in subtree.nodes() if (subtree.out_degree(node) == 0 and node in self.tree.tree.graph['fathomed_node_ids'])]
+            else:
+                leaf_nodes = [node for node in subtree.nodes() if subtree.out_degree(node) == 0]
+            
+            if len(leaf_nodes) == 0:
+                # could not find any valid path through sub-tree
+                return []
+
+            if self.retro_trajectory_construction == 'random':
+                # randomly choose leaf node as final node
+                final_node = leaf_nodes[random.choice(range(len(leaf_nodes)))]
+            elif self.retro_trajectory_construction == 'deepest':
+                # choose leaf node which would lead to deepest subtree as final node
+                depths = [len(shortest_path(subtree, source=root_node, target=leaf_node)) for leaf_node in leaf_nodes]
+                final_node = leaf_nodes[depths.index(max(depths))]
+            elif self.retro_trajectory_construction == 'shortest':
+                # choose leaf node which would lead to shortest subtree as final node
+                depths = [len(shortest_path(subtree, source=root_node, target=leaf_node)) for leaf_node in leaf_nodes]
+                final_node = leaf_nodes[depths.index(min(depths))]
+            elif self.retro_trajectory_construction == 'max_leaf_lp_gain':
+                # choose leaf node which has greatest LP gain as final node
+                lp_gains = [subtree.nodes[leaf_node]['lower_bound'] for leaf_node in leaf_nodes]
+                final_node = leaf_nodes[lp_gains.index(max(lp_gains))]
+            elif self.retro_trajectory_construction == 'reverse_visitation_order':
+                step_node_visited = [self.tree.tree.nodes[leaf_node]['step_visited'] for leaf_node in leaf_nodes]
+                final_node = leaf_nodes[step_node_visited.index(max(step_node_visited))]
+            elif self.retro_trajectory_construction == 'visitation_order':
+                step_node_visited = [self.tree.tree.nodes[leaf_node]['step_visited'] for leaf_node in leaf_nodes]
+                final_node = leaf_nodes[step_node_visited.index(min(step_node_visited))]
+            else:
+                raise Exception(f'Unrecognised retro_trajectory_construction {self.retro_trajectory_construction}')
+            path = shortest_path(self.tree.tree, source=root_node, target=final_node)
+
+        return path
+    def extract(self, model, done):
+        if not self.started:
+            self.started = True
+            self.tree = SearchTree(model)
+            return None
+
+        if not done:
+            # update B&B tree
+            self.tree.update_tree(model)
+            return None
+        
+        else:
+            # instance finished, retrospectively create subtree episode paths
+            self.tree.update_tree(model)
+
+            if self.tree.tree.graph['root_node'] is None:
+                # instance was pre-solved
+                return [{0: 0}]
+
+            # collect sub-tree episodes
+            subtrees_step_idx_to_reward = []
+
+            # keep track of which nodes have been added to a sub-tree
+            self.nodes_added = set()
+            
+            if self.debug_mode:
+                print('\nB&B tree:')
+                print(f'All nodes saved: {self.tree.tree.nodes()}')
+                print(f'Visited nodes: {self.tree.tree.graph["visited_node_ids"]}')
+                self.tree.render()
+
+            # remove nodes which were never visited by the brancher and therefore do not have a score or next state
+            nodes = [node for node in self.tree.tree.nodes]
+            for node in nodes:
+                if 'step_visited' not in self.tree.tree.nodes[node]:
+                    self.tree.tree.remove_node(node)
+                    if self.debug_mode:
+                        print(f'Removing node {node} since was never visited by brancher.')
+                    if node in self.tree.tree.graph['visited_node_ids']:
+                        # hack: SCIP sometimes returns large int rather than None node_id when episode finished
+                        # since never visited this node (since no score assigned), do not count this node as having been visited when calculating paths below
+                        if self.debug_mode:
+                            print(f'Removing node {node} from visied IDs since was never actually visited by brancher.')
+                        self.tree.tree.graph['visited_node_ids'].remove(node)                    
+                        
+            # set node scores (transition rewards)
+            for node in self.tree.tree.nodes:
+                if node in self.tree.tree.graph['fathomed_node_ids']:
+                    self.tree.tree.nodes[node]['score'] = 0
+                else:
+                    self.tree.tree.nodes[node]['score'] = -1
+
+            # map which nodes were visited at which step in episode
+            self.visited_nodes_to_step_idx = {node: idx for idx, node in enumerate(self.tree.tree.graph['visited_node_ids'])}
+
+            if not self.use_retro_trajectories:
+                # do not use any sub-tree episodes, just return whole B&B tree episode
+                step_idx_to_reward = {}
+                for node, step_idx in self.visited_nodes_to_step_idx.items():
+                    step_idx_to_reward[step_idx] = self.tree.tree.nodes[node]['score']
+                subtrees_step_idx_to_reward.append(step_idx_to_reward)
+                return subtrees_step_idx_to_reward 
+            
+            root_node = list(self.tree.tree.graph['root_node'].keys())[0]
+            # create sub-tree episodes from remaining B&B nodes visited by agent
+            while True:
+                # create depth first search sub-trees from nodes still leftover
+                nx_subtrees = []
+                
+                # construct sub-trees containing prospective sub-tree episode(s) from remaining nodes
+                if len(self.nodes_added) > 0:
+                    for node in self.nodes_added:
+                        children = [child for child in self.tree.tree.successors(node)]
+                        for child in children:
+                            if child not in self.nodes_added:
+                                nx_subtrees.append(dfs_tree(self.tree.tree, child))
+                else:
+                    # not yet added any nodes to a sub-tree, whole B&B tree is first 'sub-tree'
+                    nx_subtrees.append(dfs_tree(self.tree.tree, root_node))
+                            
+                for i, subtree in enumerate(nx_subtrees):
+                    # init node attributes for nodes in subtree (since these are not transferred into new subtree by networkx)
+                    for node in subtree.nodes:
+                        subtree.nodes[node]['score'] = self.tree.tree.nodes[node]['score']
+                        subtree.nodes[node]['lower_bound'] = self.tree.tree.nodes[node]['lower_bound']
+
+                    # choose episode path through sub-tree
+                    path = self._select_path_in_subtree(subtree)
+                    
+                    if len(path) > 0:
+                        # gather rewards in sub-tree
+                        subtree_step_idx_to_reward = self.conv_path_to_step_idx_reward_map(path)
+                        if subtree_step_idx_to_reward is not None:
+                            subtrees_step_idx_to_reward.append(subtree_step_idx_to_reward)
+                        else:
+                            # subtree was not deep enough to be added
+                            pass
+                    else:
+                        # cannot establish valid path through sub-tree, do not consider nodes in this sub-tree again
+                        for node in subtree.nodes():
+                            self.nodes_added.add(node)
+
+                if len(nx_subtrees) == 0:
+                    # all sub-trees added
+                    break
+        if self.debug_mode:
+            print(f'visited_nodes_to_step_idx: {self.visited_nodes_to_step_idx}')
+            step_idx_to_visited_nodes = {val: key for key, val in self.visited_nodes_to_step_idx.items()}
+            print(f'step_idx_to_visited_nodes: {step_idx_to_visited_nodes}')
+            for i, ep in enumerate(subtrees_step_idx_to_reward):
+                print(f'>>> sub-tree episode {i+1}: {ep}')
+                ep_path = [step_idx_to_visited_nodes[idx] for idx in ep.keys()]
+                print(f'path: {ep_path}')
+                ep_dual_bounds = [self.tree.tree.nodes[node]['lower_bound'] for node in ep_path]
+                print(f'ep_dual_bounds: {ep_dual_bounds}')
+        
+        if len(subtrees_step_idx_to_reward) == 0:
+            # solved at root so path length < min path length so was never added to subtrees
+            return [{0: 0}]
+        else:
+            return subtrees_step_idx_to_reward

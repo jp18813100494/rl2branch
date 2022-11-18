@@ -132,11 +132,11 @@ class IQL(nn.Module):
         value_loss = loss(min_Q - value, self.expectile).mean()
         return value_loss
     
-    def calc_q_loss(self, states, actions, rewards, dones, next_states):
+    def calc_q_loss(self, states, actions, rewards, dones, next_states,tree=False):
         dones = torch.unsqueeze(dones,-1)
         rewards = torch.unsqueeze(rewards,-1)
         with torch.no_grad():
-            if isinstance(next_states,tuple):
+            if tree:
                 next_states_l,next_states_r = next_states
                 next_l_v = self.value_net(next_states_l)
                 next_r_v = self.value_net(next_states_r)
@@ -208,7 +208,7 @@ class IQL(nn.Module):
                 next_states = (batch.constraint_features_n, batch.edge_index_n, batch.edge_attr_n, 
                             batch.variable_features_n,batch.action_set_n,batch.action_set_n_size)
             dones = batch.done
-            critic1_loss, critic2_loss = self.calc_q_loss(states, actions, rewards, dones, next_states)
+            critic1_loss, critic2_loss = self.calc_q_loss(states, actions, rewards, dones, next_states, batch.tree[0])
             critic1_loss /= n_samples
             critic1_loss.backward()
             clip_grad_norm_(self.critic1.parameters(), self.clip_grad_param)
