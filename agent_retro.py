@@ -251,7 +251,7 @@ class Agent(threading.Thread):
                             if t < len(path_nodes)-1:
                                 transition['next_state'] = original_transitions[path_nodes[t+1]]['state']
                             else:
-                                transition['next_state'] = transition['state']
+                                transition['done'] = True
                         transition = utilities.FullTransition(transition['state'], transition['action'], transition['action_idx'], transition['reward'], transition['done'], transition['next_state'], 0)
                         transitions.append(transition)
                         t += 1

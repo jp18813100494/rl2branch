@@ -210,8 +210,8 @@ class Actor(GNNPolicy):
     """
     Actor function for discrete actions
     """
-    def __init__(self, hidding_size,seed=1):
-        super().__init__(emb_size=hidding_size)
+    def __init__(self, hidding_size, seed=1):
+        super().__init__(emb_size=hidding_size, seed=seed)
     
     def forward(self,state, eval=False):
         if eval is False:
@@ -256,8 +256,8 @@ class Critic(GNNPolicy):
     """
     Critic function for discrete actions
     """
-    def __init__(self, hidding_size,seed=1):
-        super().__init__(emb_size=hidding_size)
+    def __init__(self, hidding_size, seed=1):
+        super().__init__(emb_size=hidding_size ,seed=seed)
     
     def forward(self, state):
         constraint_features, edge_indices, edge_features, variable_features,candidates,nb_candidates = state
@@ -270,7 +270,7 @@ class Value(GNNPolicy):
     Critic function for discrete actions
     """
     def __init__(self, hidding_size,seed=1):
-        super().__init__(emb_size=hidding_size)
+        super().__init__(emb_size=hidding_size, seed=seed)
     
     def forward(self, state):
         constraint_features, edge_indices, edge_features, variable_features,candidates,nb_candidates = state
@@ -282,7 +282,7 @@ def pad_tensor(input_, pad_sizes, value=False, pad_value=-1e8):
     max_pad_size = pad_sizes.max()
     output = input_.split(pad_sizes.cpu().numpy().tolist())
     if value:
-        output = torch.stack([torch.mean(slice_) for slice_ in output], dim=0).unsqueeze(-1)
+        output = torch.stack([torch.max(slice_) for slice_ in output], dim=0).unsqueeze(-1)
     else:
         output = torch.stack([F.pad(slice_, (0, max_pad_size-slice_.size(0)), 'constant', pad_value)
                           for slice_ in output], dim=0)

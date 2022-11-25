@@ -140,8 +140,6 @@ def make_samples(in_queue, out_queue, stop_flag):
         while not done:
             action, action_idx = agent.action_select(action_set, model=env.model, done=done)
             obs, action_set, reward, done, _ = env.step(action)
-            # if done:
-            #     print('stopeed!!!')
             _custom_reward = custom_reward.extract(env.model, done)
 
             if done:
@@ -174,7 +172,7 @@ def make_samples(in_queue, out_queue, stop_flag):
                         if t < len(path_nodes)-1:
                             transition['next_state'] = original_transitions[path_nodes[t+1]]['state']
                         else:
-                            transition['next_state'] = transition['state']
+                            transition['done'] = True
                     filename = f'{out_dir}/sample_{episode}_{step_idx}.pkl'
                     data = [transition['state'], transition['action'],transition['action_idx'],transition['reward'],transition['done'],transition['next_state']]
                     with gzip.open(filename, 'wb') as f:
@@ -192,7 +190,7 @@ def make_samples(in_queue, out_queue, stop_flag):
                         'filename': filename,
                     })
                     t += 1
-                    print(f"[w {threading.current_thread().name}] episode {episode} done, {step_idx}ed samples\n", end='')
+                    print(f"[w {threading.current_thread().name}] episode {episode} done, {step_idx} samples\n", end='')
         out_queue.put({
             'type': 'done',
             'episode': episode,
