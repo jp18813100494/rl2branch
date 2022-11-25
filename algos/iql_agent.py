@@ -43,16 +43,19 @@ class IQL(nn.Module):
 
         self.critic1_optimizer = optim.Adam(self.critic1.parameters(), lr=self.critic_lr)
         self.critic2_optimizer = optim.Adam(self.critic2.parameters(), lr=self.critic_lr) 
+        # self.critic_optimizer = optim.Adam([
+        #                                     {'params': self.critic1.parameters(), 'lr': self.critic_lr}, 
+        #                                     {'params': self.critic2.parameters(), 'lr': self.critic_lr}
+        #                                     ])
         
         self.value_net = Value(self.hidden_size).to(self.device)
-        
         self.value_optimizer = optim.Adam(self.value_net.parameters(), lr=self.critic_lr)
         self.step = 0
 
-        self.actor_scheduler = Scheduler(self.actor_optimizer, mode='min', patience=5, factor=0.2, verbose=True)
-        self.critic1_scheduler = Scheduler(self.critic1_optimizer, mode='min', patience=5, factor=0.2, verbose=True)
-        self.critic2_scheduler = Scheduler(self.critic2_optimizer, mode='min', patience=5, factor=0.2, verbose=True)
-        self.value_scheduler = Scheduler(self.value_optimizer, mode='min', patience=5, factor=0.2, verbose=True)
+        self.actor_scheduler = Scheduler(self.actor_optimizer, mode='min', patience=5, factor=0.5, verbose=True)
+        self.critic1_scheduler = Scheduler(self.critic1_optimizer, mode='min', patience=5, factor=0.5, verbose=True)
+        self.critic2_scheduler = Scheduler(self.critic2_optimizer, mode='min', patience=5, factor=0.5, verbose=True)
+        self.value_scheduler = Scheduler(self.value_optimizer, mode='min', patience=5, factor=0.5, verbose=True)
         
         full_layers = ['cons_embedding','edge_embedding','var_embedding','conv_v_to_c','conv_c_to_v','output_module']
         self.freeze_layers = []
@@ -89,7 +92,6 @@ class IQL(nn.Module):
                 logits_end = batch.action_set_size.cumsum(-1)
                 logits_start = logits_end - batch.action_set_size
                 for start, end, greedy in zip(logits_start, logits_end, greedy):
-                    # action_idx = logits[start:end].argmax()
                     if greedy:
                         action_idx = logits[start:end].argmax()
                     else:
