@@ -309,12 +309,12 @@ def train(config, args):
             agent.scheduler_step(wandb_data['valid_nnodes_g'])
             if config['wandb'] and agent.actor_scheduler.num_bad_epochs == 0:
                 logger.info(f"best model so far")
-            elif agent.actor_scheduler.num_bad_epochs %5 ==0 and agent.actor_scheduler.num_bad_epochs< 50:
-                logger.info(f"5 epochs without improvement, decreasing learning rate")
+            elif agent.actor_scheduler.num_bad_epochs %5 ==0 and agent.actor_scheduler.num_bad_epochs< 15:
+                logger.info(f"5 evaluations without improvement, decreasing learning rate")
                 logger.info(f"Current learning rate: {cur_lr}")
-            elif agent.actor_scheduler.num_bad_epochs == 50 or cur_lr <=1e-6 :
-                logger.info(f"Offline: 20 epochs without improvement, switch to online")
-                logger.info(f'Offline end at {epoch} epochs')
+            elif agent.actor_scheduler.num_bad_epochs == 15 or cur_lr <=1e-6 :
+                logger.info(f"Offline: 15 evaluations without improvement, switch to online")
+                logger.info(f'Offline end at {epoch} evaluations')
                 logger.info(f'Start online training')
                 agent.switch_to_online()
                 train_batch = next(train_batches)

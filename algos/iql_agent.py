@@ -41,20 +41,21 @@ class IQL(nn.Module):
         self.critic2_target = Critic(self.hidden_size).to(self.device)
         self.critic2_target.load_state_dict(self.critic2.state_dict())
 
-        self.critic1_optimizer = optim.Adam(self.critic1.parameters(), lr=self.critic_lr)
-        self.critic2_optimizer = optim.Adam(self.critic2.parameters(), lr=self.critic_lr) 
-        # self.critic_optimizer = optim.Adam([
-        #                                     {'params': self.critic1.parameters(), 'lr': self.critic_lr}, 
-        #                                     {'params': self.critic2.parameters(), 'lr': self.critic_lr}
-        #                                     ])
+        # self.critic1_optimizer = optim.Adam(self.critic1.parameters(), lr=self.critic_lr)
+        # self.critic2_optimizer = optim.Adam(self.critic2.parameters(), lr=self.critic_lr) 
+        self.critic_optimizer = optim.Adam([
+                                                                {'params': self.critic1.parameters(), 'lr': self.critic_lr}, 
+                                                                {'params': self.critic2.parameters(), 'lr': self.critic_lr}
+                                                                ])
         
         self.value_net = Value(self.hidden_size).to(self.device)
         self.value_optimizer = optim.Adam(self.value_net.parameters(), lr=self.critic_lr)
         self.step = 0
 
         self.actor_scheduler = Scheduler(self.actor_optimizer, mode='min', patience=5, factor=0.5, verbose=True)
-        self.critic1_scheduler = Scheduler(self.critic1_optimizer, mode='min', patience=5, factor=0.5, verbose=True)
-        self.critic2_scheduler = Scheduler(self.critic2_optimizer, mode='min', patience=5, factor=0.5, verbose=True)
+        self.critic_scheduler = Scheduler(self.critic_optimizer, mode='min', patience=5, factor=0.5, verbose=True)
+        # self.critic1_scheduler = Scheduler(self.critic1_optimizer, mode='min', patience=5, factor=0.5, verbose=True)
+        # self.critic2_scheduler = Scheduler(self.critic2_optimizer, mode='min', patience=5, factor=0.5, verbose=True)
         self.value_scheduler = Scheduler(self.value_optimizer, mode='min', patience=5, factor=0.5, verbose=True)
         
         full_layers = ['cons_embedding','edge_embedding','var_embedding','conv_v_to_c','conv_c_to_v','output_module']
@@ -64,15 +65,20 @@ class IQL(nn.Module):
 
     def scheduler_step(self,metric):
         self.actor_scheduler.step(metric)
-        self.critic1_scheduler.step(metric)
-        self.critic2_scheduler.step(metric)
+        self.critic_optimizer.step(metric)
+        # self.critic1_scheduler.step(metric)
+        # self.critic2_scheduler.step(metric)
         self.value_scheduler.step(metric)
         
 
     def reset_optimizer(self):
         self.actor_optimizer = optim.Adam(self.actor_local.parameters(), lr=self.actor_on_lr) 
-        self.critic1_optimizer = optim.Adam(self.critic1.parameters(), lr=self.critic_on_lr)
-        self.critic2_optimizer = optim.Adam(self.critic2.parameters(), lr=self.critic_on_lr)
+        self.critic_optimizer = optim.Adam([
+                                                                {'params': self.critic1.parameters(), 'lr': self.critic_on_lr}, 
+                                                                {'params': self.critic2.parameters(), 'lr': self.critic_on_lr}
+                                                                ])
+        # self.critic1_optimizer = optim.Adam(self.critic1.parameters(), lr=self.critic_on_lr)
+        # self.critic2_optimizer = optim.Adam(self.critic2.parameters(), lr=self.critic_on_lr)
         self.value_optimizer = optim.Adam(self.value_net.parameters(), lr=self.critic_on_lr)
 
     def sample_action_idx(self, states, greedy):
@@ -193,8 +199,9 @@ class IQL(nn.Module):
             stats['entropy'] = stats.get('entropy', 0.0) + entropy.item()
         self.actor_optimizer.step()
 
-        self.critic1_optimizer.zero_grad()
-        self.critic2_optimizer.zero_grad()
+        # self.critic1_optimizer.zero_grad()
+        # self.critic2_optimizer.zero_grad()
+        self.critic_optimizer.zero_grad()
         for batch in transitions:
             batch = batch.to(self.device)
             states = (batch.constraint_features, batch.edge_index, batch.edge_attr,batch.variable_features,batch.action_set,batch.action_set_size)
@@ -221,9 +228,9 @@ class IQL(nn.Module):
             # Update stats
             stats['critic1_loss'] = stats.get('critic1_loss', 0.0) + critic1_loss.item()
             stats['critic2_loss'] = stats.get('critic2_loss', 0.0) + critic2_loss.item()
-
-        self.critic1_optimizer.step()
-        self.critic2_optimizer.step()
+        self.critic_optimizer.step()
+        # self.critic1_optimizer.step()
+        # self.critic2_optimizer.step()
 
         if self.step % self.hard_update_every == 0:
             # ----------------------- update target networks ----------------------- #
