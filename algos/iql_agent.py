@@ -65,7 +65,7 @@ class IQL(nn.Module):
 
     def scheduler_step(self,metric):
         self.actor_scheduler.step(metric)
-        self.critic_optimizer.step(metric)
+        self.critic_scheduler.step(metric)
         # self.critic1_scheduler.step(metric)
         # self.critic2_scheduler.step(metric)
         self.value_scheduler.step(metric)
