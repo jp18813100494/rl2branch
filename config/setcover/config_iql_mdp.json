@@ -13,6 +13,8 @@
     "tau": 5e-3,
     "entropy_bonus":1,
     "entropy_bonus_on":1e-4,
+    "demonstrator_margin": 0.8,
+    "sl_loss_factor": 0.1,
     "gamma": 1.0,
     "hard_update_every": 10,
     "clip_grad_param": 100,

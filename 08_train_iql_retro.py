@@ -36,6 +36,8 @@ def get_config():
     parser.add_argument("--tau", type=float, default=5e-3, help="")
     parser.add_argument("--entropy_bonus", type=float, default=1e-5, help="")
     parser.add_argument("--entropy_bonus_on", type=float, default=1e-5, help="")
+    parser.add_argument("--demonstrator_margin", type=float, default=0.8, help="")
+    parser.add_argument("--sl_loss_factor", type=float, default=0.1, help="")
     parser.add_argument("--gamma", type=float, default=1.0, help="")
     parser.add_argument("--lammbda", type=float, default=3.0, help="")
     parser.add_argument("--num_action_samples", type=int, default=5, help="")

@@ -1,8 +1,11 @@
+from calendar import c
+from email import policy
 from re import M
 import torch
 import torch_geometric
 import torch.optim as optim
 import torch.nn as nn
+import torch.nn.functional as F
 from torch.nn.utils import clip_grad_norm_
 from algos.network import Critic, Actor, Value
 
@@ -24,6 +27,8 @@ class IQL(nn.Module):
         self.actor_on_lr = config["actor_on_lr"]
         self.critic_on_lr = config["critic_on_lr"]
         self.hidden_size = config['hidden_size']
+        self.demonstrator_margin = config['demonstrator_margin']
+        self.sl_loss_factor = config["sl_loss_factor"]
         
         # Actor Network 
         self.actor_local = Actor(self.hidden_size, self.seed).to(self.device)
@@ -41,8 +46,6 @@ class IQL(nn.Module):
         self.critic2_target = Critic(self.hidden_size).to(self.device)
         self.critic2_target.load_state_dict(self.critic2.state_dict())
 
-        # self.critic1_optimizer = optim.Adam(self.critic1.parameters(), lr=self.critic_lr)
-        # self.critic2_optimizer = optim.Adam(self.critic2.parameters(), lr=self.critic_lr) 
         self.critic_optimizer = optim.Adam([
                                                                 {'params': self.critic1.parameters(), 'lr': self.critic_lr}, 
                                                                 {'params': self.critic2.parameters(), 'lr': self.critic_lr}
@@ -54,11 +57,10 @@ class IQL(nn.Module):
 
         self.actor_scheduler = Scheduler(self.actor_optimizer, mode='min', patience=5, factor=0.5, verbose=True)
         self.critic_scheduler = Scheduler(self.critic_optimizer, mode='min', patience=5, factor=0.5, verbose=True)
-        # self.critic1_scheduler = Scheduler(self.critic1_optimizer, mode='min', patience=5, factor=0.5, verbose=True)
-        # self.critic2_scheduler = Scheduler(self.critic2_optimizer, mode='min', patience=5, factor=0.5, verbose=True)
         self.value_scheduler = Scheduler(self.value_optimizer, mode='min', patience=5, factor=0.5, verbose=True)
         
-        full_layers = ['cons_embedding','edge_embedding','var_embedding','conv_v_to_c','conv_c_to_v','output_module']
+        # full_layers = ['cons_embedding','edge_embedding','var_embedding','conv_v_to_c','conv_c_to_v','output_module']
+        full_layers = ['cons_embedding','edge_embedding','var_embedding']
         self.freeze_layers = []
         for i in range(self.config['pretrain_module_nums']):
             self.freeze_layers.append(full_layers[i])
@@ -66,8 +68,6 @@ class IQL(nn.Module):
     def scheduler_step(self,metric):
         self.actor_scheduler.step(metric)
         self.critic_scheduler.step(metric)
-        # self.critic1_scheduler.step(metric)
-        # self.critic2_scheduler.step(metric)
         self.value_scheduler.step(metric)
         
 
@@ -77,8 +77,6 @@ class IQL(nn.Module):
                                                                 {'params': self.critic1.parameters(), 'lr': self.critic_on_lr}, 
                                                                 {'params': self.critic2.parameters(), 'lr': self.critic_on_lr}
                                                                 ])
-        # self.critic1_optimizer = optim.Adam(self.critic1.parameters(), lr=self.critic_on_lr)
-        # self.critic2_optimizer = optim.Adam(self.critic2.parameters(), lr=self.critic_on_lr)
         self.value_optimizer = optim.Adam(self.value_net.parameters(), lr=self.critic_on_lr)
 
     def sample_action_idx(self, states, greedy):
@@ -123,12 +121,16 @@ class IQL(nn.Module):
         exp_a = torch.exp((min_Q - v) * self.temperature)
         exp_a = torch.min(exp_a, torch.FloatTensor([100.0]).to(self.device)).squeeze(-1)
 
-        _, dist = self.actor_local.evaluate(states)
+        _, dist, logits = self.actor_local.evaluate(states)
         log_probs = dist.log_prob(actions.squeeze(-1))
         actor_loss = -(exp_a * log_probs).mean()
         entropy = dist.entropy().mean()
+        if self.sl_loss_factor>0:
+            policy_sl_loss = self.calc_policy_sl_loss(logits, actions)
+        else:
+            policy_sl_loss = 0
 
-        return actor_loss,entropy
+        return actor_loss,entropy,policy_sl_loss
     
     def calc_value_loss(self, states, actions):
         with torch.no_grad():
@@ -152,12 +154,28 @@ class IQL(nn.Module):
             else:
                 next_v = self.value_net(next_states)
                 q_target = rewards + (self.gamma * (1 - dones) * next_v) 
-
-        q1 = self.critic1(states).gather(1, actions.long())
-        q2 = self.critic2(states).gather(1, actions.long())
+        q1_values = self.critic1(states)
+        q2_values = self.critic2(states)
+        q1 = q1_values.gather(1, actions.long())
+        q2 = q2_values.gather(1, actions.long())
         critic1_loss = ((q1 - q_target)**2).mean() 
         critic2_loss = ((q2 - q_target)**2).mean()
+        if self.sl_loss_factor>0:
+            q1_sl_loss = self.calc_q_sl_loss(q1_values,actions)
+            q2_sl_loss = self.calc_q_sl_loss(q2_values,actions)
+            critic1_loss +=  self.sl_loss_factor*q1_sl_loss.mean()
+            critic2_loss +=  self.sl_loss_factor*q2_sl_loss.mean()
         return critic1_loss, critic2_loss
+
+    def calc_q_sl_loss(self, q_values, actions):
+        agent_action_idxs = torch.stack([q.argmax() for q in q_values]).unsqueeze(-1)
+        margin_function = torch.where(agent_action_idxs == actions, 0, 1) * self.demonstrator_margin
+        sl_loss = (q_values.gather(1, agent_action_idxs.long())+ margin_function) - q_values.gather(1, actions.long())
+        return sl_loss
+    
+    def calc_policy_sl_loss(self, logits,actions):
+        cross_entropy_loss = F.cross_entropy(logits, actions.squeeze(), reduction='mean')
+        return cross_entropy_loss
 
     def update(self, transitions):
         n_samples = len(transitions)
@@ -187,11 +205,14 @@ class IQL(nn.Module):
             loss = torch.tensor([0.0], device=self.device)
             states = (batch.constraint_features, batch.edge_index, batch.edge_attr,batch.variable_features,batch.action_set,batch.action_set_size)
             actions = batch.action_idx.unsqueeze(1)
-            actor_loss,entropy = self.calc_policy_loss(states, actions)
+            actor_loss,entropy,policy_sl_loss = self.calc_policy_loss(states, actions)
             actor_loss /= n_samples
             loss += actor_loss
             entropy /= n_samples
             loss += - self.config['entropy_bonus']*entropy
+            if self.sl_loss_factor>0:
+                policy_sl_loss /= n_samples
+                loss += self.sl_loss_factor*policy_sl_loss
             loss.backward()
             # Update stats
             stats['actor_loss'] = stats.get('actor_loss', 0.0) + actor_loss.item()
@@ -199,8 +220,6 @@ class IQL(nn.Module):
             stats['entropy'] = stats.get('entropy', 0.0) + entropy.item()
         self.actor_optimizer.step()
 
-        # self.critic1_optimizer.zero_grad()
-        # self.critic2_optimizer.zero_grad()
         self.critic_optimizer.zero_grad()
         for batch in transitions:
             batch = batch.to(self.device)
@@ -346,6 +365,7 @@ class IQL(nn.Module):
         self.config['train_stat'] = 'online'
         self.reset_optimizer()
         self.config['entropy_bonus'] = self.config["entropy_bonus_on"]
+        self.sl_loss_factor = 0
 
 
 def loss(diff, expectile=0.8):
