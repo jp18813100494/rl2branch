@@ -221,8 +221,6 @@ def train(config, args):
     for epoch in range(0, config['max_epochs']+1):
         logger.info(f'** Epoch {epoch}')
         wandb_data = {}
-        # if epoch==5:
-        #     print('Stop!!!')
         # Allow preempted jobs to access policy
         if is_validation_epoch(epoch):
             v_stats, v_queue, v_access = v_stats_next, v_queue_next, v_access_next

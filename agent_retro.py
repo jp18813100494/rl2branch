@@ -54,7 +54,6 @@ class AgentPool():
                     'samples': samples, 'stats': stats, 'policy_access': policy_access}
             job_sponsor.put(task)
             self.jobs_queue.put(job_sponsor)
-        samples = random.shuffle(samples)
         ret = (samples, stats, job_sponsor)
         if block_policy:
             ret = (*ret, policy_access)
