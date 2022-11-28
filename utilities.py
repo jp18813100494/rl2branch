@@ -98,7 +98,7 @@ class FullTransition(Transition):
         # action_idx = scores[self.action_set].argmax()env
         # action_idx = (self.action_set==action).nonzero().item()
         self.action_idx = torch.LongTensor(np.array([action_idx],dtype=np.int32))
-        self.reward = torch.FloatTensor(np.expand_dims(-reward, axis=-1))
+        self.reward = torch.FloatTensor(np.expand_dims(reward, axis=-1))
         self.done = torch.FloatTensor(np.expand_dims(int(done), axis=-1))
 
         if isinstance(next_state,list):
@@ -191,6 +191,8 @@ def BuildFullTransition(data_files):
         if isinstance(next_state,list):
             if next_state[0] is None and next_state[1] is None:
                 continue
+        # if done:
+        #     print(reward)
         fulltransition = FullTransition(state, action, action_idx, reward, done, next_state)
         transitions.append(fulltransition)
     random.shuffle(transitions)
