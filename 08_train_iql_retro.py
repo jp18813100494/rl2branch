@@ -13,7 +13,6 @@ import utilities
 import glob
 import pprint
 import ecole
-from algos.iql_agent import IQL
 from algos.awac_agent import AWAC
 from utilities import BuildFullTransition,get_lr
 from agent_retro import AgentPool
@@ -26,6 +25,7 @@ def get_config():
     parser.add_argument('--model_path', type=str, default='IQL-tmdp+DFS-cauctions-2022-11-14_17-33-27', help='path for pretrained model')
     parser.add_argument('--load_pretrain', type=bool, default=False, help='')
     parser.add_argument("--pretrain_module_nums", type=int, default=3, help="")
+    parser.add_argument('--encoder', type=bool, default=False, help='')
     parser.add_argument("--hidden_size", type=int, default=64, help="")
     parser.add_argument("--actor_lr", type=float, default=3e-3, help="actor learning_rate")
     parser.add_argument("--critic_lr", type=float, default=3e-3, help="critic learning_rate")
@@ -42,6 +42,7 @@ def get_config():
     parser.add_argument("--lammbda", type=float, default=3.0, help="")
     parser.add_argument("--num_action_samples", type=int, default=5, help="")
     parser.add_argument("--use_adv", type=bool, default=True, help="")
+    parser.add_argument('--hard_update', type=bool, default=True, help='')
     parser.add_argument("--hard_update_every", type=int, default=10, help="")
     parser.add_argument("--clip_grad_param", type=int, default=100, help="")
 
@@ -54,7 +55,7 @@ def get_config():
     parser.add_argument("--batch_size", type=int, default=32, help="Batch size, default: 256")
     parser.add_argument("--valid_batch_size", type=int, default=128, help="Valid Batch size, default: 256")
     parser.add_argument("--num_valid_instances", type=int, default=20, help="Number of valid instances for branch_env")
-    parser.add_argument("--num_train_samples", type=int, default=500, help="Number of valid instances for branch_env")
+    parser.add_argument("--num_train_samples", type=int, default=2500, help="Number of valid instances for branch_env")
     parser.add_argument("--num_episodes_per_epoch", type=int, default=10, help="Number of train samples in every epoch")
     parser.add_argument("--query_expert_prob", type=float, default=1.0, help='Probability for query the expert')
     parser.add_argument("--train_stat", type=str, default='offline', choices=['offline', 'online'], help="Init stat for agent")
@@ -78,7 +79,7 @@ def get_config():
     args_config = {key: getattr(args, key) for key in config.keys() & vars(args).keys()}
     config.update(args_config)
 
-    config['hard_update_every'] = 5*int(np.floor(config['num_train_samples']/config['batch_size']))
+    config['hard_update_every'] = int(np.floor(config['num_train_samples']/config['batch_size']))
     ### Device SETUP ###
     if config['gpu'] == -1:
         os.environ['CUDA_VISIBLE_DEVICES'] = ''
@@ -175,11 +176,6 @@ def train(config, args):
         for seed in range(config['num_valid_seeds']):
             valid_batch.append({'path': instance, 'seed': seed})
 
-    # collect the pre-computed optimal solutions for the training instances
-    with open(f"{config['train_path']}/instance_solutions.json", "r") as f:
-        train_sols = json.load(f)
-    eps = config["eps"] = -0.1 if config['maximization'] else 0.1
-
     def train_batch_generator():
         while True:
             train_batch = []
@@ -188,12 +184,17 @@ def train(config, args):
                 train_batch.append({'path': instance, 'seed': rng.randint(0, 2**32)})
             yield train_batch
     train_batches = train_batch_generator()
-    # logger.info(f"Training on {len(train_files)} training instances and {len(valid_instances)} validation instances")
 
     batches = 0
     if config['algo_name'] == 'IQL':
-        agent = IQL(config=config)
-        logger.info(f'Epoch:0, Actor_lr:{get_lr(agent.actor_optimizer)},Critic_lr:{get_lr(agent.value_optimizer)}')
+        if config['encoder']:
+            from algos.iql_agent_enc import IQL
+            agent = IQL(config=config)
+            logger.info(f'Epoch:0, Actor_lr:{get_lr(agent.actor_optimizer)},Critic_lr:{get_lr(agent.critic_optimizer)}')
+        else:
+            from algos.iql_agent import IQL
+            agent = IQL(config=config)
+            logger.info(f'Epoch:0, Actor_lr:{get_lr(agent.actor_optimizer)},Critic_lr:{get_lr(agent.value_optimizer)}')
     elif config['algo_name'] == 'AWAC':
         agent = AWAC(config=config)
         logger.info(f'Epoch:0, Actor_lr:{get_lr(agent.actor_optimizer)},Critic_lr:{get_lr(agent.critic1_optimizer)}')
@@ -237,7 +238,7 @@ def train(config, args):
             logger.info(f"Status: {config['train_stat']}-{len(train_batch)} training jobs running (preempted)")
         if is_offline_training_epoch(epoch):
             epoch_train_files = rng.choice(train_files, config['hard_update_every']*config['batch_size'], replace=True)
-            t_samples,t_stats = BuildFullTransition(epoch_train_files)
+            t_samples, t_stats = BuildFullTransition(epoch_train_files)
             logger.info(f"Status: {config['train_stat']}-{len(t_samples)} training samples was selected")
 
         # Start next epoch's jobs

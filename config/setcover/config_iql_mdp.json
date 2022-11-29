@@ -2,6 +2,7 @@
     "algo_name": "IQL",
     "model_path": "none",
     "load_pretrain": false,
+    "encoder": true,
     "pretrain_module_nums":3,
     "hidden_size": 64,
     "actor_lr": 3e-4,
@@ -16,6 +17,7 @@
     "demonstrator_margin": 0.8,
     "sl_loss_factor": 0.1,
     "gamma": 1.0,
+    "hard_update": true,
     "hard_update_every": 10,
     "clip_grad_param": 100,
 
