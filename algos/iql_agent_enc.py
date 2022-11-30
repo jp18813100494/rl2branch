@@ -61,8 +61,8 @@ class IQL(nn.Module):
                                                                 {'params': self.value_net.output_module.parameters(), 'lr': self.critic_lr},
                                                                 ])
         self.step = 0
-        self.actor_scheduler = Scheduler(self.actor_optimizer, mode='min', patience=10, factor=0.5, verbose=True)
-        self.critic_scheduler = Scheduler(self.critic_optimizer, mode='min', patience=10, factor=0.5, verbose=True)
+        self.actor_scheduler = Scheduler(self.actor_optimizer, mode='min', patience=5, factor=0.5, verbose=True)
+        self.critic_scheduler = Scheduler(self.critic_optimizer, mode='min', patience=5, factor=0.5, verbose=True)
         
         # full_layers = ['cons_embedding','edge_embedding','var_embedding','conv_v_to_c','conv_c_to_v','output_module']
         full_layers = ['cons_embedding','edge_embedding','var_embedding']
