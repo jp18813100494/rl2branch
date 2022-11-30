@@ -55,8 +55,8 @@ def get_config():
     parser.add_argument("--batch_size", type=int, default=32, help="Batch size, default: 256")
     parser.add_argument("--valid_batch_size", type=int, default=128, help="Valid Batch size, default: 256")
     parser.add_argument("--num_valid_instances", type=int, default=20, help="Number of valid instances for branch_env")
-    parser.add_argument("--num_train_samples", type=int, default=2500, help="Number of valid instances for branch_env")
-    parser.add_argument("--num_episodes_per_epoch", type=int, default=10, help="Number of train samples in every epoch")
+    parser.add_argument("--num_train_samples", type=int, default=500, help="Number of valid instances for branch_env")
+    parser.add_argument("--num_episodes_per_epoch", type=int, default=4, help="Number of train samples in every epoch")
     parser.add_argument("--query_expert_prob", type=float, default=1.0, help='Probability for query the expert')
     parser.add_argument("--train_stat", type=str, default='offline', choices=['offline', 'online'], help="Init stat for agent")
     
@@ -310,11 +310,11 @@ def train(config, args):
             agent.scheduler_step(wandb_data['valid_nnodes_g'])
             if config['wandb'] and agent.actor_scheduler.num_bad_epochs == 0:
                 logger.info(f"best model so far")
-            elif agent.actor_scheduler.num_bad_epochs %5 ==0 and agent.actor_scheduler.num_bad_epochs< 15:
-                logger.info(f"5 evaluations without improvement, decreasing learning rate")
+            elif agent.actor_scheduler.num_bad_epochs %10 ==0 and agent.actor_scheduler.num_bad_epochs< 30:
+                logger.info(f"10 evaluations without improvement, decreasing learning rate")
                 logger.info(f"Current learning rate: {cur_lr}")
-            elif agent.actor_scheduler.num_bad_epochs == 15 or cur_lr <=1e-6 :
-                logger.info(f"Offline: 15 evaluations without improvement, switch to online")
+            elif agent.actor_scheduler.num_bad_epochs == 30 or cur_lr <=1e-6 :
+                logger.info(f"Offline: 30 evaluations without improvement, switch to online")
                 logger.info(f'Offline end at {epoch} evaluations')
                 logger.info(f'Start online training')
                 agent.switch_to_online()
