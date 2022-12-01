@@ -77,9 +77,10 @@ class IQL(nn.Module):
     def reset_optimizer(self):
         self.actor_optimizer = optim.Adam(self.actor_local.parameters(), lr=self.actor_on_lr) 
         self.critic_optimizer = optim.Adam([
-                                                                {'params': self.value_net.parameters(), 'lr': self.critic_lr}, 
-                                                                {'params': self.critic1.parameters(), 'lr': self.critic_lr}, 
-                                                                {'params': self.critic2.parameters(), 'lr': self.critic_lr}
+                                                                {'params': self.encoder.parameters(), 'lr': self.critic_lr}, 
+                                                                {'params': self.critic1.output_module.parameters(), 'lr': self.critic_lr}, 
+                                                                {'params': self.critic2.output_module.parameters(), 'lr': self.critic_lr},
+                                                                {'params': self.value_net.output_module.parameters(), 'lr': self.critic_lr},
                                                                 ])
 
     def sample_action_idx(self, states, greedy):
@@ -208,11 +209,11 @@ class IQL(nn.Module):
             dones = batch.done
             #Compute q-function loss
             critic1_loss, critic2_loss = self.calc_q_loss(states, actions, rewards, dones, next_states, batch.tree[0])
-            critic1_loss /= n_samples/self.config["batch_size"]
-            critic2_loss /= n_samples/self.config["batch_size"]
+            critic1_loss /= n_samples
+            critic2_loss /= n_samples
             #Compute value function loss
             value_loss = self.calc_value_loss(states, actions)
-            value_loss /= n_samples/self.config["batch_size"]
+            value_loss /= n_samples
             loss = critic1_loss + critic2_loss + value_loss
             loss.backward()
             # Update stats
@@ -228,7 +229,7 @@ class IQL(nn.Module):
             states = (batch.constraint_features, batch.edge_index, batch.edge_attr,batch.variable_features,batch.action_set,batch.action_set_size)
             actions = batch.action_idx.unsqueeze(1)
             actor_loss,entropy,policy_sl_loss = self.calc_policy_loss(states, actions)
-            actor_loss /= n_samples/self.config["batch_size"]
+            actor_loss /= n_samples
             loss += actor_loss
             entropy /= n_samples
             loss += - self.config['entropy_bonus']*entropy
