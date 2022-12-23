@@ -124,7 +124,7 @@ class IQL(nn.Module):
         _, dist, logits = self.actor_local.evaluate(states)
         log_probs = dist.log_prob(actions.squeeze(-1))
         actor_loss = -(exp_a * log_probs).mean()
-        entropy = dist.entropy().mean()
+        entropy = dist.entropy().sum()
         if self.sl_loss_factor>0:
             policy_sl_loss = self.calc_policy_sl_loss(logits, actions)
         else:
