@@ -1,0 +1,5 @@
+policy,seed,type,instance,nnodes,nlps,stime,gap,status,walltime,proctime
+internal:relpscost,0,test,data/instances/ufacilities/test_35_35_5/instance_1.lp,10218,12830,47.47,0.0,optimal,58.06689567305148,58.050097592
+internal:relpscost,1,test,data/instances/ufacilities/test_35_35_5/instance_1.lp,5218,6319,20.73,0.0,optimal,26.467179793398827,26.463145318000002
+internal:relpscost,2,test,data/instances/ufacilities/test_35_35_5/instance_1.lp,545,810,5.72,0.0,optimal,7.0730242296122015,7.071968932999994
+internal:relpscost,3,test,data/instances/ufacilities/test_35_35_5/instance_1.lp,4954,6527,25.97,0.0,optimal,32.33454151311889,32.329946961000005
